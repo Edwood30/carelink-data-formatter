@@ -418,6 +418,30 @@ def format_contact_number(val):
     return val_str
 
 
+def find_column(df, candidates, exclude=None):
+    """
+    Case/whitespace-insensitive column lookup, with a loose contains-match
+    fallback. Returns the *actual* column name from df, or None if nothing
+    matches any candidate. `exclude` lets a caller rule out columns already
+    claimed by another field, so a generic candidate (e.g. "Category")
+    can't accidentally re-match a column meant for something else.
+    """
+    exclude = set(exclude or [])
+    normalized = {
+        str(c).strip().lower(): c for c in df.columns if c not in exclude
+    }
+    for cand in candidates:
+        key = cand.strip().lower()
+        if key in normalized:
+            return normalized[key]
+    for cand in candidates:
+        key = cand.strip().lower()
+        for norm_key, orig in normalized.items():
+            if key in norm_key or norm_key in key:
+                return orig
+    return None
+
+
 def clean_filename(user_input, default_name):
     """Ensures file name ends with .xlsx and is not empty."""
     name = user_input.strip() if user_input else ""
@@ -661,50 +685,82 @@ def process_rendered_medicines(df):
 # FEATURE 2: Automated Patient & Contact Merger (2 Files)
 # =========================================================
 def process_and_merge(df_med, df_patient):
-    med_pin_col = "Patient PIN" if "Patient PIN" in df_med.columns else None
-    patient_pin_col = (
-        "Patient PIN" if "Patient PIN" in df_patient.columns else None
+    # --- PIN detection (join key) ---------------------------------------
+    med_pin_col = find_column(df_med, ["Patient PIN", "PIN", "PatientPIN"])
+    patient_pin_col = find_column(
+        df_patient, ["Patient PIN", "PIN", "PatientPIN"]
     )
 
     if not med_pin_col or not patient_pin_col:
         st.error(
-            "Could not find 'Patient PIN' column in one or both uploaded files."
+            "Could not find a 'Patient PIN' column in one or both uploaded "
+            "files. Found columns:\n"
+            f"- Medicines file: {list(df_med.columns)}\n"
+            f"- Patients file: {list(df_patient.columns)}"
         )
         return None
 
-    df_med["PIN_JOIN"] = df_med[med_pin_col].astype(str).str.strip()
-    df_patient["PIN_JOIN"] = df_patient[patient_pin_col].astype(str).str.strip()
+    def clean_pin(series):
+        return (
+            series.astype(str)
+            .str.strip()
+            .str.replace(r"\.0$", "", regex=True)  # e.g. "30261824716.0" -> "30261824716"
+        )
+
+    df_med["PIN_JOIN"] = clean_pin(df_med[med_pin_col])
+    df_patient["PIN_JOIN"] = clean_pin(df_patient[patient_pin_col])
 
     patient_lookup = df_patient.drop_duplicates(subset=["PIN_JOIN"]).copy()
 
-    phone_col = (
-        "Cellphone Number"
-        if "Cellphone Number" in patient_lookup.columns
-        else (
-            "Contact Number"
-            if "Contact Number" in patient_lookup.columns
-            else None
-        )
+    # --- Fuzzy-detect every other field we need, on BOTH files ----------
+    phone_col = find_column(
+        patient_lookup,
+        [
+            "Cellphone Number",
+            "Contact Number",
+            "Mobile Number",
+            "Phone Number",
+            "Cellphone No",
+            "Cellphone No.",
+            "Contact No",
+            "Contact No.",
+        ],
     )
-    address_col = "Address" if "Address" in patient_lookup.columns else None
+    address_col = find_column(
+        patient_lookup, ["Address", "Complete Address", "Home Address"]
+    )
+    _pat_last = find_column(patient_lookup, ["Last Name"])
+    _pat_first = find_column(patient_lookup, ["First Name"])
+    _pat_middle = find_column(patient_lookup, ["Middle Name"])
+    patient_name_col_pat = find_column(
+        patient_lookup,
+        ["Patient Name", "Full Name", "Patient Full Name"],
+        exclude=[c for c in (_pat_last, _pat_first, _pat_middle) if c],
+    )
 
     cols_to_fetch = ["PIN_JOIN"]
-    if phone_col:
-        cols_to_fetch.append(phone_col)
-    if address_col:
-        cols_to_fetch.append(address_col)
+    for c in (phone_col, address_col, patient_name_col_pat):
+        if c and c not in cols_to_fetch:
+            cols_to_fetch.append(c)
 
     merged = pd.merge(
         df_med, patient_lookup[cols_to_fetch], on="PIN_JOIN", how="left"
     )
 
-    if "Rendered Date" in merged.columns:
-        merged["Rendered Date"] = (
-            pd.to_datetime(merged["Rendered Date"], errors="coerce")
+    # --- Rendered Date ----------------------------------------------------
+    rendered_date_col = find_column(
+        merged, ["Rendered Date", "Date Rendered", "Consultation Date"]
+    )
+    if rendered_date_col:
+        merged["Rendered Date Clean"] = (
+            pd.to_datetime(merged[rendered_date_col], errors="coerce")
             .dt.strftime("%m/%d/%Y")
             .fillna("")
         )
+    else:
+        merged["Rendered Date Clean"] = ""
 
+    # --- Contact Number -----------------------------------------------
     if phone_col and phone_col in merged.columns:
         merged["Contact Number Clean"] = merged[phone_col].apply(
             format_contact_number
@@ -712,14 +768,83 @@ def process_and_merge(df_med, df_patient):
     else:
         merged["Contact Number Clean"] = ""
 
+    # --- Address ----------------------------------------------------------
     merged["Address Clean"] = (
         merged[address_col].fillna("") if address_col else ""
     )
-    merged["Category Clean"] = (
-        merged["Medicine Category"].fillna("")
-        if "Medicine Category" in merged.columns
-        else ""
+
+    # --- Category (detected first so "Medicine" below can't re-match
+    #     "Medicine Category") ------------------------------------------
+    category_col = find_column(
+        merged, ["Medicine Category", "Category", "Drug Category"]
     )
+    merged["Category Clean"] = (
+        merged[category_col].fillna("") if category_col else ""
+    )
+
+    # --- Medicine -----------------------------------------------------
+    medicine_col = find_column(
+        merged,
+        ["Medicine", "Medicine Name", "Drug", "Drug Name"],
+        exclude=[category_col] if category_col else None,
+    )
+    merged["Medicine Clean"] = (
+        merged[medicine_col].fillna("") if medicine_col else ""
+    )
+
+    # --- Patient Name: use a combined column if present, otherwise build
+    #     it from Last/First/Middle Name parts on the medicines file,
+    #     otherwise fall back to whatever the patients file has. -------
+    last_col = find_column(merged, ["Last Name"])
+    first_col = find_column(merged, ["First Name"])
+    middle_col = find_column(merged, ["Middle Name"])
+    patient_name_col_med = find_column(
+        merged,
+        ["Patient Name", "Full Name", "Patient Full Name"],
+        exclude=[c for c in (last_col, first_col, middle_col) if c],
+    )
+
+    if patient_name_col_med:
+        merged["Patient Name Clean"] = merged[patient_name_col_med].fillna("")
+        name_source = f"'{patient_name_col_med}' column"
+    elif first_col and last_col:
+
+        def _build_name(row):
+            parts = [
+                row.get(first_col, ""),
+                row.get(middle_col, "") if middle_col else "",
+                row.get(last_col, ""),
+            ]
+            parts = [
+                str(p).strip() for p in parts if pd.notna(p) and str(p).strip()
+            ]
+            return " ".join(parts)
+
+        merged["Patient Name Clean"] = merged.apply(_build_name, axis=1)
+        name_source = (
+            f"built from '{first_col}' + '{middle_col}' + '{last_col}'"
+            if middle_col
+            else f"built from '{first_col}' + '{last_col}'"
+        )
+    elif patient_name_col_pat and patient_name_col_pat in merged.columns:
+        merged["Patient Name Clean"] = merged[patient_name_col_pat].fillna("")
+        name_source = f"'{patient_name_col_pat}' column (from Patients file)"
+    else:
+        merged["Patient Name Clean"] = ""
+        name_source = "not found — left blank"
+
+    with st.expander("🔍 Detected column mapping (click to verify)"):
+        st.markdown(
+            f"""
+- **Patient PIN** → medicines: `{med_pin_col}` · patients: `{patient_pin_col}`
+- **Patient Name** → {name_source}
+- **Contact Number** → {f"`{phone_col}` (from Patients file)" if phone_col else "not found — left blank"}
+- **Address** → {f"`{address_col}` (from Patients file)" if address_col else "not found — left blank"}
+- **Rendered Date** → {f"`{rendered_date_col}`" if rendered_date_col else "not found — left blank"}
+- **Medicine** → {f"`{medicine_col}`" if medicine_col else "not found — left blank"}
+- **Category** → {f"`{category_col}`" if category_col else "not found — left blank"}
+            """
+        )
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -799,24 +924,28 @@ def process_and_merge(df_med, df_patient):
         ws.cell(
             row=excel_row,
             column=2,
-            value=str(row.get("Patient Name", "") or ""),
+            value=str(row.get("Patient Name Clean", "") or ""),
         )
         ws.cell(row=excel_row, column=3, value=str(row.get("PIN_JOIN", "")))
         ws.cell(
             row=excel_row,
             column=4,
-            value=str(row.get("Contact Number Clean", "")),
+            value=str(row.get("Contact Number Clean", "") or ""),
         )
         ws.cell(
-            row=excel_row, column=5, value=str(row.get("Address Clean", ""))
+            row=excel_row,
+            column=5,
+            value=str(row.get("Address Clean", "") or ""),
         )
         ws.cell(
             row=excel_row,
             column=6,
-            value=str(row.get("Rendered Date", "") or ""),
+            value=str(row.get("Rendered Date Clean", "") or ""),
         )
         ws.cell(
-            row=excel_row, column=7, value=str(row.get("Medicine", "") or "")
+            row=excel_row,
+            column=7,
+            value=str(row.get("Medicine Clean", "") or ""),
         )
         ws.cell(
             row=excel_row,
