@@ -1,4 +1,7 @@
+import base64
 import io
+import os
+
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -6,10 +9,31 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+# =========================================================
+# LOGO — "FTCC Head.png" is expected to sit alongside this
+# script. Drop the file in the same folder as app.py.
+# =========================================================
+LOGO_FILENAME = "FTCC Head.png"
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_FILENAME)
+
+
+@st.cache_data(show_spinner=False)
+def load_logo_base64(path):
+    """Reads the logo file and returns a base64 data URI, or None if missing."""
+    try:
+        with open(path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:image/png;base64,{encoded}"
+    except FileNotFoundError:
+        return None
+
+
+LOGO_DATA_URI = load_logo_base64(LOGO_PATH)
+
 # Page Configuration
 st.set_page_config(
     page_title="CareLink Data Formatting Suite",
-    page_icon="🧩",
+    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "🧩",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -50,6 +74,13 @@ header[data-testid="stHeader"] {
     margin-bottom: 24px;
 }
 
+.app-header-logo {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+    border-radius: 6px;
+}
+
 /* Section Titles */
 .hero-tag {
     font-size: 11px;
@@ -58,8 +89,8 @@ header[data-testid="stHeader"] {
     text-transform: uppercase;
     margin-bottom: 4px;
 }
-.hero-tag-blue { color: #0284C7; }
-.hero-tag-green { color: #1E3A5F; }
+.hero-tag-blue { color: #2F5FE8; }
+.hero-tag-green { color: #16213E; }
 
 .hero-title {
     font-size: 32px;
@@ -177,15 +208,15 @@ div[data-baseweb="input"] input {
 }
 
 .pill-active-blue {
-    background-color: #EFF6FF;
-    color: #0284C7;
-    border: 1px solid #BAE6FD;
+    background-color: #EAF1FE;
+    color: #2F5FE8;
+    border: 1px solid #C9DBFC;
 }
 
 .pill-active-green {
-    background-color: #EEF2FB;
-    color: #1E3A5F;
-    border: 1px solid #C7D2E8;
+    background-color: #EAECF3;
+    color: #16213E;
+    border: 1px solid #C7CCDE;
 }
 
 .pill-inactive {
@@ -216,7 +247,7 @@ div[data-baseweb="input"] input {
 .stTabs [aria-selected="true"] {
     background-color: transparent !important;
     color: #0F172A !important;
-    border-bottom: 2.5px solid #1E3A5F !important;
+    border-bottom: 2.5px solid #16213E !important;
 }
 
 /* =========================================================
@@ -267,10 +298,10 @@ div[data-testid="stFileUploaderDropzoneInstructions"] small {
 
 /* Browse/Upload button */
 div[data-testid="stFileUploaderDropzone"] button {
-    background-color: #FFFFFF !important;
-    border: 1px solid #CBD5E1 !important;
+    background-color: #2F5FE8 !important;
+    border: 1px solid #2F5FE8 !important;
     border-radius: 8px !important;
-    color: #0F172A !important;
+    color: #FFFFFF !important;
     font-weight: 600 !important;
     font-size: 13px !important;
     height: 34px !important;
@@ -279,8 +310,11 @@ div[data-testid="stFileUploaderDropzone"] button {
     order: 1;
 }
 div[data-testid="stFileUploaderDropzone"] button:hover {
-    background-color: #F8FAFC !important;
-    border-color: #94A3B8 !important;
+    background-color: #2650C9 !important;
+    border-color: #2650C9 !important;
+}
+div[data-testid="stFileUploaderDropzone"] button p {
+    color: #FFFFFF !important;
 }
 
 /* Uploaded file chip — render as a blue mono filename, no size/thumbnail chrome */
@@ -298,7 +332,7 @@ div[data-testid="stFileUploaderFile"] > div:first-child {
 div[data-testid="stFileUploaderFileName"] {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 13px !important;
-    color: #0284C7 !important;
+    color: #2F5FE8 !important;
     font-weight: 500 !important;
     white-space: normal !important;
     overflow-wrap: anywhere !important;
@@ -318,17 +352,17 @@ div.stButton > button {
     width: 100%;
     height: 42px;
     border-radius: 8px;
-    background-color: #1E3A5F !important;
+    background-color: #16213E !important;
     color: #FFFFFF !important;
     font-size: 14px !important;
     font-weight: 700 !important;
     border: none !important;
-    box-shadow: 0 1px 3px rgba(30, 58, 95, 0.3);
+    box-shadow: 0 1px 3px rgba(22, 33, 62, 0.35);
     transition: all 0.15s ease;
 }
 
 div.stButton > button:hover {
-    background-color: #16304C !important;
+    background-color: #0F1730 !important;
 }
 
 div.stButton > button:disabled {
@@ -340,11 +374,11 @@ div.stButton > button:disabled {
 
 /* Banner */
 .success-banner {
-    background-color: #EFF6FF;
-    border: 1px solid #BAE6FD;
+    background-color: #EAF1FE;
+    border: 1px solid #C9DBFC;
     border-radius: 8px;
     padding: 12px 16px;
-    color: #1E3A5F;
+    color: #16213E;
     font-size: 13px;
     font-weight: 500;
     margin-top: 16px;
@@ -1019,12 +1053,18 @@ def process_and_merge(df_med, df_patient):
 # APP HEADER & TABS NAVIGATION
 # =========================================================
 
-st.markdown(
-    """
-<div class="app-header">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="#0284C7">
+_header_icon_html = (
+    f'<img src="{LOGO_DATA_URI}" alt="FTCC" class="app-header-logo" />'
+    if LOGO_DATA_URI
+    else """<svg width="20" height="20" viewBox="0 0 24 24" fill="#2F5FE8">
         <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
-    </svg>
+    </svg>"""
+)
+
+st.markdown(
+    f"""
+<div class="app-header">
+    {_header_icon_html}
     CareLink Data Formatting Suite
 </div>
 """,
@@ -1053,7 +1093,7 @@ with tab1:
         """
     <div class="card-box">
         <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #0F172A;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#0284C7"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#2F5FE8"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
             Required Excel (.xlsx) Column Structure
         </div>
         <div style="font-size: 13px; color: #64748B; margin-top: 4px;">
