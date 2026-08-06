@@ -38,10 +38,18 @@ def find_column(df, candidates, exclude=None):
         key = cand.strip().lower()
         if key in normalized:
             return normalized[key]
+    # Word-boundary fuzzy fallback: only match when every word in the
+    # candidate we're searching for also appears in the actual column name
+    # (e.g. "PIN" -> "Patient PIN"). Matching in the reverse direction is
+    # deliberately NOT done — e.g. searching for "Medicine Category" must
+    # not match a column simply named "Medicine", since "medicine" being a
+    # substring/word-subset of "medicine category" would otherwise steal
+    # that column away from the real "Medicine" search.
     for cand in candidates:
-        key = cand.strip().lower()
+        cand_words = set(cand.strip().lower().split())
         for norm_key, orig in normalized.items():
-            if key in norm_key or norm_key in key:
+            norm_words = set(norm_key.split())
+            if cand_words and cand_words <= norm_words:
                 return orig
     return None
 

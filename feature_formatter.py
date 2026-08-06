@@ -13,7 +13,7 @@ import streamlit as st
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from utils import clean_filename
+from utils import clean_filename, find_column
 
 MERGE_COLS = [
     "Patient Name",
@@ -54,7 +54,40 @@ CENTERED_COLS = [
 ]
 
 
+def _sort_by_last_name(df):
+    """
+    Sorts rows alphabetically by Last Name (then First Name), keeping every
+    patient's own rows (e.g. multiple medicines) contiguous — required for
+    the patient-block merging further down. Falls back to a combined
+    Patient Name column if there's no separate Last/First Name.
+    """
+    df = df.copy()
+    last_col = find_column(df, ["Last Name"])
+    first_col = find_column(df, ["First Name"])
+    pin_col = find_column(df, ["Patient PIN", "PIN"])
+    name_col = find_column(df, ["Patient Name", "Full Name"])
+
+    if last_col:
+        df["_sort_last"] = df[last_col].astype(str).str.strip().str.lower()
+    elif name_col:
+        df["_sort_last"] = df[name_col].astype(str).str.strip().str.lower()
+    else:
+        df["_sort_last"] = ""
+
+    df["_sort_first"] = (
+        df[first_col].astype(str).str.strip().str.lower() if first_col else ""
+    )
+    df["_sort_pin"] = df[pin_col].astype(str) if pin_col else ""
+
+    df = df.sort_values(
+        by=["_sort_last", "_sort_first", "_sort_pin"], kind="stable"
+    ).reset_index(drop=True)
+    return df.drop(columns=["_sort_last", "_sort_first", "_sort_pin"])
+
+
 def process_rendered_medicines(df):
+    df = _sort_by_last_name(df)
+
     for date_col in ["Consultation Date", "Rendered Date"]:
         if date_col in df.columns:
             df[date_col] = (

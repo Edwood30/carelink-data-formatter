@@ -23,26 +23,54 @@ from styles import inject_custom_css, inject_uploader_tweaks
 # script. Drop the file in the same folder as app.py.
 # =========================================================
 LOGO_FILENAME = "FTCC Head.png"
-LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), LOGO_FILENAME)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_PATH = os.path.join(APP_DIR, LOGO_FILENAME)
+
+
+def _find_logo_path():
+    """
+    Resolves the logo file, tolerating case/spacing differences
+    (e.g. "ftcc head.PNG") in case the exact filename doesn't match.
+    Returns the real path on disk, or None if nothing matches.
+    """
+    if os.path.isfile(LOGO_PATH):
+        return LOGO_PATH
+    try:
+        target = LOGO_FILENAME.strip().lower()
+        for fname in os.listdir(APP_DIR):
+            if fname.strip().lower() == target:
+                return os.path.join(APP_DIR, fname)
+    except OSError:
+        pass
+    return None
 
 
 @st.cache_data(show_spinner=False)
-def load_logo_base64(path):
-    """Reads the logo file and returns a base64 data URI, or None if missing."""
-    try:
-        with open(path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("utf-8")
-        return f"data:image/png;base64,{encoded}"
-    except FileNotFoundError:
+def _load_logo_base64_cached(path, mtime):
+    """mtime is part of the cache key so adding/replacing the file while
+    the app server is already running doesn't serve a stale cached result."""
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("utf-8")
+    ext = os.path.splitext(path)[1].lstrip(".").lower() or "png"
+    mime = "jpeg" if ext == "jpg" else ext
+    return f"data:image/{mime};base64,{encoded}"
+
+
+def load_logo_base64():
+    resolved = _find_logo_path()
+    if not resolved:
         return None
+    return _load_logo_base64_cached(resolved, os.path.getmtime(resolved))
 
 
-LOGO_DATA_URI = load_logo_base64(LOGO_PATH)
+LOGO_DATA_URI = load_logo_base64()
+
+_resolved_logo_path = _find_logo_path()
 
 # Page Configuration
 st.set_page_config(
     page_title="CareLink Data Formatting Suite",
-    page_icon=LOGO_PATH if os.path.exists(LOGO_PATH) else "🧩",
+    page_icon=_resolved_logo_path if _resolved_logo_path else "🧩",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -70,6 +98,21 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
+if not LOGO_DATA_URI:
+    with st.expander("⚠️ Logo not loading — click for details"):
+        st.markdown(f"Looking for `{LOGO_FILENAME}` in:\n\n`{APP_DIR}`")
+        try:
+            found = os.listdir(APP_DIR)
+            st.markdown("Files actually in that folder:")
+            st.code("\n".join(found) if found else "(empty)")
+        except OSError as e:
+            st.markdown(f"Could not list that folder: {e}")
+        st.markdown(
+            "If your file is listed above with a different name/case, rename it "
+            f"to exactly `{LOGO_FILENAME}`, or place it in the same folder as `app.py` "
+            "and restart the app."
+        )
 
 tab1, tab2 = st.tabs(["📄 CareLink Express Data", "⊕ CareLink Coordinator Data"])
 

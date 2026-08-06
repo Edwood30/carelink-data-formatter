@@ -250,6 +250,33 @@ def _build_patient_lookup(df_patient):
     return lookup, meta
 
 
+def _last_first_key(rec):
+    return (
+        (rec.get("Last Name") or "").strip().lower(),
+        (rec.get("First Name") or "").strip().lower(),
+    )
+
+
+def _sort_records_alphabetically(records):
+    """Sorts by Last Name, then First Name — keeping every patient's own rows
+    (e.g. multiple medicines) together and in their original relative order."""
+    groups = {}
+    pin_order = []
+    for rec in records:
+        pin = rec["__pin__"]
+        if pin not in groups:
+            groups[pin] = []
+            pin_order.append(pin)
+        groups[pin].append(rec)
+
+    sorted_pins = sorted(pin_order, key=lambda p: _last_first_key(groups[p][0]))
+
+    sorted_records = []
+    for pin in sorted_pins:
+        sorted_records.extend(groups[pin])
+    return sorted_records
+
+
 def _apply_column_widths(ws, headers):
     for idx, h in enumerate(headers, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = COLUMN_WIDTHS.get(h, 15)
@@ -379,6 +406,9 @@ def process_and_merge(df_med, df_patient):
             rec["Text"] = ""
             rec["Remarks"] = ""
             missing_records.append(rec)
+
+    rendered_records = _sort_records_alphabetically(rendered_records)
+    missing_records = sorted(missing_records, key=_last_first_key)
 
     with st.expander("🔍 Detected column mapping (click to verify)"):
         st.markdown(
