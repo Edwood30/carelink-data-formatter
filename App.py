@@ -82,7 +82,7 @@ inject_uploader_tweaks()
 # APP HEADER & TABS NAVIGATION
 # =========================================================
 _header_icon_html = (
-    f'<img src="{LOGO_DATA_URI}" alt="FTCC" class="app-header-logo" />'
+    f'<img src="{LOGO_DATA_URI}" alt="FTCC" class="app-header-logo" style="width:22px;height:22px;max-width:22px;max-height:22px;object-fit:contain;border-radius:4px;display:block;" />'
     if LOGO_DATA_URI
     else """<svg width="20" height="20" viewBox="0 0 24 24" fill="#2F5FE8">
         <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
@@ -91,15 +91,15 @@ _header_icon_html = (
 
 st.markdown(
     f"""
-<div class="app-header-row">
-    <div class="app-header-left">
-        <div class="app-header-icon-wrap">{_header_icon_html}</div>
+<div class="app-header-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:20px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;">
+    <div class="app-header-left" style="display:flex;align-items:center;gap:12px;">
+        <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex-shrink:0;overflow:hidden;border-radius:9px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
         <div>
-            <div class="app-header-title">CareLink Data Formatting Suite</div>
-            <div class="app-header-subtitle">Upload CareLink reports, get clean formatted spreadsheets.</div>
+            <div class="app-header-title" style="font-size:17px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting Suite</div>
+            <div class="app-header-subtitle" style="font-size:12.5px;color:#64748B;line-height:1.4;">Upload CareLink reports, get clean formatted spreadsheets.</div>
         </div>
     </div>
-    <span class="pill-badge pill-active-blue app-header-badge">CARELINK OPS</span>
+    <span class="pill-badge pill-active-blue app-header-badge" style="flex-shrink:0;margin-top:2px;">CARELINK OPS</span>
 </div>
 """,
     unsafe_allow_html=True,

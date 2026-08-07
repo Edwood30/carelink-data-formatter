@@ -30,9 +30,9 @@ header[data-testid="stHeader"] {
 
 /* App Header */
 .app-header-row {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
     gap: 16px;
     padding-bottom: 20px;
     margin-bottom: 24px;
@@ -40,8 +40,8 @@ header[data-testid="stHeader"] {
 }
 
 .app-header-left {
-    display: flex;
-    align-items: center;
+    display: flex !important;
+    align-items: center !important;
     gap: 12px;
 }
 
@@ -52,6 +52,7 @@ header[data-testid="stHeader"] {
     width: 34px;
     height: 34px;
     flex-shrink: 0;
+    overflow: hidden;
     border-radius: 9px;
     background-color: #FFFFFF;
     border: 1px solid #E2E8F0;
@@ -76,10 +77,13 @@ header[data-testid="stHeader"] {
 }
 
 .app-header-logo {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    border-radius: 4px;
+    width: 22px !important;
+    height: 22px !important;
+    max-width: 22px !important;
+    max-height: 22px !important;
+    object-fit: contain !important;
+    border-radius: 4px !important;
+    display: block !important;
 }
 
 /* Section Titles */
@@ -238,8 +242,13 @@ div[data-baseweb="input"] input {
     font-weight: 700;
 }
 
-/* Tabs Styling — segmented pill toggle */
-.stTabs [data-baseweb="tab-list"] {
+/* Tabs Styling — segmented pill toggle.
+   NOTE: newer Streamlit versions dropped the old data-baseweb attributes
+   on tabs entirely — the real hooks are data-testid="stTabs"/"stTab" plus
+   the standard ARIA role/aria-selected attributes. Selectors below are
+   written to match both the current and the older markup so this keeps
+   working across Streamlit versions. */
+[data-testid="stTabs"] [role="tablist"] {
     display: flex;
     gap: 6px;
     background-color: #F1F5F9;
@@ -249,23 +258,25 @@ div[data-baseweb="input"] input {
     margin-bottom: 24px;
 }
 
-.stTabs [data-baseweb="tab"] {
+[data-testid="stTabs"] [data-testid="stTab"],
+[data-testid="stTabs"] [role="tab"] {
     flex: 1;
     height: 42px;
-    display: flex;
+    display: flex !important;
     align-items: center;
     justify-content: center;
-    background-color: transparent;
-    font-weight: 600;
-    font-size: 14px;
-    color: #64748B;
-    border: none;
-    border-radius: 8px;
-    padding: 0 8px;
+    background-color: transparent !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
+    color: #64748B !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 0 8px !important;
     transition: all 0.15s ease;
 }
 
-.stTabs [aria-selected="true"] {
+[data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"],
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
     background-color: #16213E !important;
     color: #FFFFFF !important;
     border-radius: 8px !important;
@@ -278,14 +289,20 @@ div[data-baseweb="input"] input {
    style). The default Streamlit button is kept but made invisible
    and stretched over the whole box so the entire area stays
    clickable; the visible icon/text is injected by JS below.
+
+   NOTE: newer Streamlit renders the dropzone as a <section>, not a
+   <div>, and renders uploaded files as "stFileChip" elements (not
+   "stFileUploaderFile"). Selectors below use bare attribute
+   selectors (no leading tag name) so they match regardless of which
+   HTML tag Streamlit puts them on, and cover both naming schemes.
    ========================================================= */
 
-div[data-testid="stFileUploader"] {
+[data-testid="stFileUploader"] {
     width: 100%;
 }
 
-div[data-testid="stFileUploader"] > section,
-div[data-testid="stFileUploaderDropzone"] {
+[data-testid="stFileUploader"] > section,
+[data-testid="stFileUploaderDropzone"] {
     position: relative !important;
     background-color: #FAFBFC !important;
     border: 2px dashed #CBD5E1 !important;
@@ -299,18 +316,18 @@ div[data-testid="stFileUploaderDropzone"] {
     min-height: 150px !important;
     transition: all 0.15s ease;
 }
-div[data-testid="stFileUploaderDropzone"]:hover {
+[data-testid="stFileUploaderDropzone"]:hover {
     border-color: #94A3B8 !important;
     background-color: #F8FAFC !important;
 }
 
 /* Hide Streamlit's own icon/instructions — we render our own below */
-div[data-testid="stFileUploaderDropzoneInstructions"] {
+[data-testid="stFileUploaderDropzoneInstructions"] {
     display: none !important;
 }
 
-/* Browse button becomes an invisible full-cover click target */
-div[data-testid="stFileUploaderDropzone"] button {
+/* Browse/Upload button becomes an invisible full-cover click target */
+[data-testid="stFileUploaderDropzone"] button {
     position: absolute !important;
     inset: 0 !important;
     width: 100% !important;
@@ -351,17 +368,15 @@ div[data-testid="stFileUploaderDropzone"] button {
     font-weight: 700;
 }
 
-div[data-testid="stFileUploaderFile"] {
+/* Uploaded-file row — current Streamlit calls these "FileChip"s */
+[data-testid="stFileChip"] {
     background-color: #F8FAFC !important;
     border: 1px solid #E2E8F0 !important;
     border-radius: 8px !important;
     padding: 8px 12px !important;
     margin-top: 10px !important;
 }
-div[data-testid="stFileUploaderFile"] > div:first-child {
-    display: none !important;
-}
-div[data-testid="stFileUploaderFileName"] {
+[data-testid="stFileChipName"] {
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 13px !important;
     color: #2F5FE8 !important;
@@ -369,10 +384,33 @@ div[data-testid="stFileUploaderFileName"] {
     white-space: normal !important;
     overflow-wrap: anywhere !important;
 }
-div[data-testid="stFileUploaderFile"] small {
+[data-testid="stFileChipDeleteBtn"] svg {
+    color: #94A3B8 !important;
+}
+
+/* Older Streamlit naming, kept for backward compatibility */
+[data-testid="stFileUploaderFile"] {
+    background-color: #F8FAFC !important;
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin-top: 10px !important;
+}
+[data-testid="stFileUploaderFile"] > div:first-child {
     display: none !important;
 }
-div[data-testid="stFileUploaderDeleteBtn"] button svg {
+[data-testid="stFileUploaderFileName"] {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 13px !important;
+    color: #2F5FE8 !important;
+    font-weight: 500 !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+}
+[data-testid="stFileUploaderFile"] small {
+    display: none !important;
+}
+[data-testid="stFileUploaderDeleteBtn"] button svg {
     color: #94A3B8 !important;
 }
 
@@ -436,17 +474,13 @@ def inject_uploader_tweaks():
             const doc = window.parent.document;
 
             function tweak() {
-                doc.querySelectorAll('div[data-testid="stFileUploaderDropzone"] button').forEach(btn => {
-                    const label = btn.querySelector('div, span, p') || btn;
-                    if (label && label.textContent.trim().toLowerCase().includes('browse')) {
-                        label.textContent = 'Browse';
-                    }
-                });
-
                 // Inject the big centered icon + "Click to upload or drag
                 // and drop" visual once per dropzone (guarded so repeated
-                // MutationObserver callbacks don't duplicate it).
-                doc.querySelectorAll('div[data-testid="stFileUploaderDropzone"]').forEach(zone => {
+                // MutationObserver callbacks don't duplicate it). The real
+                // Streamlit button stays functionally in place underneath
+                // (see CSS: it's made fully transparent and stretched over
+                // the whole box), so no button-label rewriting is needed.
+                doc.querySelectorAll('[data-testid="stFileUploaderDropzone"]').forEach(zone => {
                     if (zone.querySelector('.clk-upload-visual')) return;
                     const visual = doc.createElement('div');
                     visual.className = 'clk-upload-visual';
