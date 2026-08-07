@@ -91,9 +91,15 @@ _header_icon_html = (
 
 st.markdown(
     f"""
-<div class="app-header">
-    {_header_icon_html}
-    CareLink Data Formatting Suite
+<div class="app-header-row">
+    <div class="app-header-left">
+        <div class="app-header-icon-wrap">{_header_icon_html}</div>
+        <div>
+            <div class="app-header-title">CareLink Data Formatting Suite</div>
+            <div class="app-header-subtitle">Upload CareLink reports, get clean formatted spreadsheets.</div>
+        </div>
+    </div>
+    <span class="pill-badge pill-active-blue app-header-badge">CARELINK OPS</span>
 </div>
 """,
     unsafe_allow_html=True,

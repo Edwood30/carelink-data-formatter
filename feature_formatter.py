@@ -54,18 +54,24 @@ CENTERED_COLS = [
 ]
 
 
-def _sort_by_last_name(df):
+def _sort_by_patient_source(df):
     """
-    Sorts rows alphabetically by Last Name (then First Name), keeping every
-    patient's own rows (e.g. multiple medicines) contiguous — required for
-    the patient-block merging further down. Falls back to a combined
-    Patient Name column if there's no separate Last/First Name.
+    Sorts rows alphabetically by Patient Source (then Last Name, then First
+    Name as tiebreakers), keeping every patient's own rows (e.g. multiple
+    medicines) contiguous — required for the patient-block merging further
+    down. Falls back to a combined Patient Name column if there's no
+    separate Last/First Name.
     """
     df = df.copy()
+    source_col = find_column(df, ["Patient Source", "Source"])
     last_col = find_column(df, ["Last Name"])
     first_col = find_column(df, ["First Name"])
     pin_col = find_column(df, ["Patient PIN", "PIN"])
     name_col = find_column(df, ["Patient Name", "Full Name"])
+
+    df["_sort_source"] = (
+        df[source_col].astype(str).str.strip().str.lower() if source_col else ""
+    )
 
     if last_col:
         df["_sort_last"] = df[last_col].astype(str).str.strip().str.lower()
@@ -80,13 +86,16 @@ def _sort_by_last_name(df):
     df["_sort_pin"] = df[pin_col].astype(str) if pin_col else ""
 
     df = df.sort_values(
-        by=["_sort_last", "_sort_first", "_sort_pin"], kind="stable"
+        by=["_sort_source", "_sort_last", "_sort_first", "_sort_pin"],
+        kind="stable",
     ).reset_index(drop=True)
-    return df.drop(columns=["_sort_last", "_sort_first", "_sort_pin"])
+    return df.drop(
+        columns=["_sort_source", "_sort_last", "_sort_first", "_sort_pin"]
+    )
 
 
 def process_rendered_medicines(df):
-    df = _sort_by_last_name(df)
+    df = _sort_by_patient_source(df)
 
     for date_col in ["Consultation Date", "Rendered Date"]:
         if date_col in df.columns:
@@ -337,7 +346,7 @@ def render_formatter_tab():
 
     with st.container():
         st.markdown(
-            '<div class="card-title" style="margin-left: 2px;">Drop your file here</div>',
+            '<div class="upload-label">Upload a <span class="upload-label-accent">CareLink Express</span> file</div>',
             unsafe_allow_html=True,
         )
         uploaded_file = st.file_uploader(

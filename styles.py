@@ -29,21 +29,57 @@ header[data-testid="stHeader"] {
 }
 
 /* App Header */
-.app-header {
+.app-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 20px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid #E2E8F0;
+}
+
+.app-header-left {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 18px;
+    gap: 12px;
+}
+
+.app-header-icon-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+}
+
+.app-header-title {
+    font-size: 17px;
     font-weight: 700;
     color: #0F172A;
-    margin-bottom: 24px;
+    line-height: 1.25;
+}
+
+.app-header-subtitle {
+    font-size: 12.5px;
+    color: #64748B;
+    line-height: 1.4;
+}
+
+.app-header-badge {
+    flex-shrink: 0;
+    margin-top: 2px;
 }
 
 .app-header-logo {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     object-fit: contain;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 
 /* Section Titles */
@@ -190,35 +226,58 @@ div[data-baseweb="input"] input {
     border: 1px solid #E2E8F0;
 }
 
-/* Tabs Styling */
+/* Upload label above a dropzone ("Upload a [X] file") */
+.upload-label {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #0F172A;
+    margin-bottom: 10px;
+}
+.upload-label-accent {
+    color: #2F5FE8;
+    font-weight: 700;
+}
+
+/* Tabs Styling — segmented pill toggle */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 24px;
-    border-bottom: 1px solid #E2E8F0;
-    padding-bottom: 0px;
+    display: flex;
+    gap: 6px;
+    background-color: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 6px;
     margin-bottom: 24px;
 }
 
 .stTabs [data-baseweb="tab"] {
-    height: 38px;
+    flex: 1;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background-color: transparent;
     font-weight: 600;
     font-size: 14px;
     color: #64748B;
     border: none;
-    border-bottom: 2.5px solid transparent;
-    padding: 0 4px 8px 4px;
+    border-radius: 8px;
+    padding: 0 8px;
+    transition: all 0.15s ease;
 }
 
 .stTabs [aria-selected="true"] {
-    background-color: transparent !important;
-    color: #0F172A !important;
-    border-bottom: 2.5px solid #16213E !important;
+    background-color: #16213E !important;
+    color: #FFFFFF !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 3px rgba(22, 33, 62, 0.35);
 }
 
 /* =========================================================
-   FILE UPLOADER — restyled to match the CareLink mock exactly:
-   compact single row, no drag/drop copy, "Upload" button,
-   filename shown as a blue mono link next to the button.
+   FILE UPLOADER — big dashed dropzone with a centered icon and
+   "Click to upload or drag and drop" copy (Mission-Report-Parser
+   style). The default Streamlit button is kept but made invisible
+   and stretched over the whole box so the entire area stays
+   clickable; the visible icon/text is injected by JS below.
    ========================================================= */
 
 div[data-testid="stFileUploader"] {
@@ -227,62 +286,77 @@ div[data-testid="stFileUploader"] {
 
 div[data-testid="stFileUploader"] > section,
 div[data-testid="stFileUploaderDropzone"] {
+    position: relative !important;
+    background-color: #FAFBFC !important;
+    border: 2px dashed #CBD5E1 !important;
+    border-radius: 12px !important;
+    padding: 30px 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    min-height: 150px !important;
+    transition: all 0.15s ease;
+}
+div[data-testid="stFileUploaderDropzone"]:hover {
+    border-color: #94A3B8 !important;
     background-color: #F8FAFC !important;
-    border: 1px solid #E2E8F0 !important;
-    border-radius: 8px !important;
-    padding: 10px 14px !important;
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    gap: 12px !important;
-    min-height: unset !important;
 }
 
+/* Hide Streamlit's own icon/instructions — we render our own below */
 div[data-testid="stFileUploaderDropzoneInstructions"] {
-    display: flex !important;
-    align-items: center !important;
-    gap: 0 !important;
-    order: 3;
-}
-div[data-testid="stFileUploaderDropzoneInstructions"] svg {
     display: none !important;
-}
-div[data-testid="stFileUploaderDropzoneInstructions"] span {
-    display: none !important;
-}
-div[data-testid="stFileUploaderDropzoneInstructions"] small {
-    font-family: 'JetBrains Mono', monospace !important;
-    font-size: 11.5px !important;
-    color: #94A3B8 !important;
 }
 
+/* Browse button becomes an invisible full-cover click target */
 div[data-testid="stFileUploaderDropzone"] button {
-    background-color: #2F5FE8 !important;
-    border: 1px solid #2F5FE8 !important;
-    border-radius: 8px !important;
-    color: #FFFFFF !important;
-    font-weight: 600 !important;
-    font-size: 13px !important;
-    height: 34px !important;
-    padding: 0 14px !important;
-    box-shadow: none !important;
-    order: 1;
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: unset !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
+    border-radius: 12px !important;
+    padding: 0 !important;
+    margin: 0 !important;
 }
-div[data-testid="stFileUploaderDropzone"] button:hover {
-    background-color: #2650C9 !important;
-    border-color: #2650C9 !important;
+
+/* Our injected icon + "Click to upload or drag and drop" text */
+.clk-upload-visual {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
 }
-div[data-testid="stFileUploaderDropzone"] button p {
-    color: #FFFFFF !important;
+.clk-upload-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background-color: #EEF2F7;
+    color: #16213E;
+}
+.clk-upload-text {
+    font-size: 13.5px;
+    color: #64748B;
+    text-align: center;
+}
+.clk-upload-text strong {
+    color: #16213E;
+    font-weight: 700;
 }
 
 div[data-testid="stFileUploaderFile"] {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    order: 2;
-    flex: 1 1 auto;
-    min-width: 0;
+    background-color: #F8FAFC !important;
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin-top: 10px !important;
 }
 div[data-testid="stFileUploaderFile"] > div:first-child {
     display: none !important;
@@ -297,9 +371,6 @@ div[data-testid="stFileUploaderFileName"] {
 }
 div[data-testid="stFileUploaderFile"] small {
     display: none !important;
-}
-div[data-testid="stFileUploaderDeleteBtn"] {
-    order: 4;
 }
 div[data-testid="stFileUploaderDeleteBtn"] button svg {
     color: #94A3B8 !important;
@@ -368,13 +439,28 @@ def inject_uploader_tweaks():
                 doc.querySelectorAll('div[data-testid="stFileUploaderDropzone"] button').forEach(btn => {
                     const label = btn.querySelector('div, span, p') || btn;
                     if (label && label.textContent.trim().toLowerCase().includes('browse')) {
-                        label.textContent = '↑  Upload';
+                        label.textContent = 'Browse';
                     }
                 });
-                doc.querySelectorAll('div[data-testid="stFileUploaderDropzoneInstructions"] small').forEach(el => {
-                    if (el.textContent.startsWith('Limit ')) {
-                        el.textContent = el.textContent.replace('Limit ', '');
-                    }
+
+                // Inject the big centered icon + "Click to upload or drag
+                // and drop" visual once per dropzone (guarded so repeated
+                // MutationObserver callbacks don't duplicate it).
+                doc.querySelectorAll('div[data-testid="stFileUploaderDropzone"]').forEach(zone => {
+                    if (zone.querySelector('.clk-upload-visual')) return;
+                    const visual = doc.createElement('div');
+                    visual.className = 'clk-upload-visual';
+                    visual.innerHTML = `
+                        <div class="clk-upload-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 3v12"></path>
+                                <path d="M7 8l5-5 5 5"></path>
+                                <path d="M5 21h14"></path>
+                            </svg>
+                        </div>
+                        <div class="clk-upload-text"><strong>Click to upload</strong> or drag and drop</div>
+                    `;
+                    zone.appendChild(visual);
                 });
             }
 
