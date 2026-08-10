@@ -95,7 +95,7 @@ st.markdown(
     <div class="app-header-left" style="display:flex;align-items:center;gap:12px;">
         <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex-shrink:0;overflow:hidden;border-radius:9px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
         <div>
-            <div class="app-header-title" style="font-size:17px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting Suite</div>
+            <div class="app-header-title" style="font-size:17px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting</div>
             <div class="app-header-subtitle" style="font-size:12.5px;color:#64748B;line-height:1.4;">Upload CareLink reports, get clean formatted spreadsheets.</div>
         </div>
     </div>
