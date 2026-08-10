@@ -1,9 +1,17 @@
 """
 FEATURE 1: Rendered Medicines Report Formatter.
 
-Takes a single raw "Rendered Medicines" export and turns it into a
-professionally formatted Excel workbook (merged patient blocks,
-totals row, currency/qty formatting, etc).
+Accepts a raw "Rendered Medicines" export in *any* reasonable column
+layout — mixed-up order, inconsistent naming (e.g. "Cellphone Number" vs
+"Contact Number"), split or combined name fields, messy whitespace/date
+formats, PINs read in as floats, etc. — auto-detects each needed field,
+cleans it, and always produces the same fixed 22-column report:
+
+    Patient Name, Last Name, First Name, Middle Name, Patient PIN,
+    Patient Source, Consultation Date, Rendered Date, End Visit By,
+    ICD10 Code, ICD10 Description, Medicine, Medicine Category,
+    Qty Prescribed, Qty Dispensed, Cost, Price, Total Cost, Total Price,
+    Contact Number, Address, Notes
 """
 import io
 
@@ -13,32 +21,56 @@ import streamlit as st
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from utils import clean_filename, find_column
+from utils import (
+    clean_date,
+    clean_filename,
+    clean_number,
+    clean_pin,
+    clean_str,
+    find_column,
+    format_contact_number,
+    split_name_fallback,
+)
 
-MERGE_COLS = [
+OUTPUT_COLUMNS = [
     "Patient Name",
     "Last Name",
     "First Name",
     "Middle Name",
-    "Suffix Name",
     "Patient PIN",
     "Patient Source",
     "Consultation Date",
     "Rendered Date",
     "End Visit By",
-    "Dispensed By",
     "ICD10 Code",
     "ICD10 Description",
-    "Yakap Status",
-    "Pharmacy",
+    "Medicine",
+    "Medicine Category",
+    "Qty Prescribed",
+    "Qty Dispensed",
+    "Cost",
+    "Price",
+    "Total Cost",
+    "Total Price",
     "Contact Number",
-    "Cellphone Number",
     "Address",
-    "Full Address",
-    "Street Name",
-    "Barangay",
-    "Municipality",
-    "Province",
+    "Notes",
+]
+
+# Columns that get merged across a patient's multiple medicine rows
+# (i.e. patient-identity/contact fields, not per-medicine fields).
+MERGE_COLS = [
+    "Patient Name",
+    "Last Name",
+    "First Name",
+    "Middle Name",
+    "Patient PIN",
+    "Patient Source",
+    "Consultation Date",
+    "Rendered Date",
+    "End Visit By",
+    "Contact Number",
+    "Address",
     "Notes",
 ]
 
@@ -47,11 +79,152 @@ CENTERED_COLS = [
     "Rendered Date",
     "Patient PIN",
     "Contact Number",
-    "Cellphone Number",
     "ICD10 Code",
-    "Yakap Status",
-    "Pharmacy",
 ]
+
+
+def _detect_columns(df):
+    category_col = find_column(df, ["Medicine Category", "Category", "Drug Category"])
+    return {
+        "patient_name": find_column(df, ["Patient Name", "Full Name", "Patient Full Name"]),
+        "last": find_column(df, ["Last Name"]),
+        "first": find_column(df, ["First Name"]),
+        "middle": find_column(df, ["Middle Name"]),
+        "pin": find_column(df, ["Patient PIN", "PIN", "PatientPIN"]),
+        "source": find_column(df, ["Patient Source", "Source"]),
+        "consult_date": find_column(df, ["Consultation Date"]),
+        "rendered_date": find_column(df, ["Rendered Date", "Date Rendered"]),
+        "end_visit_by": find_column(df, ["End Visit By"]),
+        "icd_code": find_column(df, ["ICD10 Code", "ICD 10 Code", "ICD-10 Code"]),
+        "icd_desc": find_column(df, ["ICD10 Description", "ICD 10 Description", "ICD-10 Description"]),
+        "medicine": find_column(df, ["Medicine", "Medicine Name", "Drug", "Drug Name"], exclude=[category_col]),
+        "category": category_col,
+        "qty_prescribed": find_column(df, ["Qty Prescribed", "Quantity Prescribed"]),
+        "qty_dispensed": find_column(df, ["Qty Dispensed", "Quantity Dispensed"]),
+        "cost": find_column(df, ["Cost", "Unit Cost"]),
+        "price": find_column(df, ["Price", "Unit Price"]),
+        "total_cost": find_column(df, ["Total Cost"]),
+        "total_price": find_column(df, ["Total Price"]),
+        "phone": find_column(df, ["Contact Number", "Cellphone Number", "Mobile Number", "Phone Number"]),
+        "address": find_column(df, ["Full Address", "Address", "Complete Address", "Home Address"]),
+        "street": find_column(df, ["Street Name"]),
+        "barangay": find_column(df, ["Barangay"]),
+        "municipality": find_column(df, ["Municipality", "City"]),
+        "province": find_column(df, ["Province"]),
+        "notes": find_column(df, ["Notes", "Remarks"]),
+    }
+
+
+def _get(row, col):
+    return row.get(col) if col else None
+
+
+def _normalize_to_output_schema(df, cols):
+    """Builds a DataFrame with exactly OUTPUT_COLUMNS, cleaned, regardless
+    of how messy/mixed-up the source file's columns were."""
+    records = []
+    for _, row in df.iterrows():
+        last_val = clean_str(_get(row, cols["last"])) if cols["last"] else ""
+        first_val = clean_str(_get(row, cols["first"])) if cols["first"] else ""
+        middle_val = clean_str(_get(row, cols["middle"])) if cols["middle"] else ""
+        raw_name = clean_str(_get(row, cols["patient_name"])) if cols["patient_name"] else ""
+
+        # Decided per row (not per file) so a file that mixes both naming
+        # styles across different rows still resolves each row correctly.
+        if last_val and first_val:
+            last, first, middle = last_val, first_val, middle_val
+            patient_name = raw_name or " ".join(p for p in [first, middle, last] if p)
+        elif raw_name:
+            last, first, middle = split_name_fallback(raw_name)
+            patient_name = raw_name
+        else:
+            last, first, middle = last_val, first_val, middle_val
+            patient_name = " ".join(p for p in [first, middle, last] if p)
+
+        if cols["address"]:
+            address = clean_str(_get(row, cols["address"]))
+        else:
+            parts = [
+                clean_str(_get(row, cols[k]))
+                for k in ("street", "barangay", "municipality", "province")
+            ]
+            address = ", ".join(p for p in parts if p)
+
+        qty_dispensed = clean_number(_get(row, cols["qty_dispensed"]))
+        cost = clean_number(_get(row, cols["cost"]))
+        price = clean_number(_get(row, cols["price"]))
+
+        total_cost = clean_number(_get(row, cols["total_cost"]))
+        if total_cost == "" and qty_dispensed != "" and cost != "":
+            total_cost = round(qty_dispensed * cost, 2)
+
+        total_price = clean_number(_get(row, cols["total_price"]))
+        if total_price == "" and qty_dispensed != "" and price != "":
+            total_price = round(qty_dispensed * price, 2)
+
+        records.append(
+            {
+                "Patient Name": patient_name,
+                "Last Name": last,
+                "First Name": first,
+                "Middle Name": middle,
+                "Patient PIN": clean_pin(_get(row, cols["pin"])),
+                "Patient Source": clean_str(_get(row, cols["source"])),
+                "Consultation Date": clean_date(_get(row, cols["consult_date"])),
+                "Rendered Date": clean_date(_get(row, cols["rendered_date"])),
+                "End Visit By": clean_str(_get(row, cols["end_visit_by"])),
+                "ICD10 Code": clean_str(_get(row, cols["icd_code"])).upper(),
+                "ICD10 Description": clean_str(_get(row, cols["icd_desc"])),
+                "Medicine": clean_str(_get(row, cols["medicine"])),
+                "Medicine Category": clean_str(_get(row, cols["category"])),
+                "Qty Prescribed": clean_number(_get(row, cols["qty_prescribed"])),
+                "Qty Dispensed": qty_dispensed,
+                "Cost": cost,
+                "Price": price,
+                "Total Cost": total_cost,
+                "Total Price": total_price,
+                "Contact Number": format_contact_number(_get(row, cols["phone"])),
+                "Address": address,
+                "Notes": clean_str(_get(row, cols["notes"])),
+            }
+        )
+
+    return pd.DataFrame(records, columns=OUTPUT_COLUMNS)
+
+
+def _mapping_summary(cols):
+    def fmt(key, label):
+        val = cols.get(key)
+        return f"`{val}`" if val else "not found — left blank"
+
+    name_line = (
+        f"`{cols['last']}` + `{cols['first']}`" + (f" + `{cols['middle']}`" if cols["middle"] else "")
+        if cols["last"] and cols["first"]
+        else (f"split from `{cols['patient_name']}`" if cols["patient_name"] else "not found — left blank")
+    )
+    address_line = (
+        f"`{cols['address']}`"
+        if cols["address"]
+        else (
+            "built from " + " + ".join(f"`{cols[k]}`" for k in ("street", "barangay", "municipality", "province") if cols[k])
+            if any(cols[k] for k in ("street", "barangay", "municipality", "province"))
+            else "not found — left blank"
+        )
+    )
+    return f"""
+- **Name** → {name_line}
+- **Patient PIN** → {fmt('pin', 'PIN')}
+- **Patient Source** → {fmt('source', 'Source')}
+- **Consultation Date** → {fmt('consult_date', 'Consultation Date')}
+- **Rendered Date** → {fmt('rendered_date', 'Rendered Date')}
+- **ICD10 Code / Description** → {fmt('icd_code', '')} / {fmt('icd_desc', '')}
+- **Medicine / Category** → {fmt('medicine', '')} / {fmt('category', '')}
+- **Qty Prescribed / Dispensed** → {fmt('qty_prescribed', '')} / {fmt('qty_dispensed', '')}
+- **Cost / Price / Total Cost / Total Price** → {fmt('cost','')} / {fmt('price','')} / {fmt('total_cost','')} / {fmt('total_price','')}
+- **Contact Number** → {fmt('phone', '')}
+- **Address** → {address_line}
+- **Notes** → {fmt('notes', '')}
+    """
 
 
 def _sort_by_patient_source(df):
@@ -59,51 +232,28 @@ def _sort_by_patient_source(df):
     Sorts rows alphabetically by Patient Source (then Last Name, then First
     Name as tiebreakers), keeping every patient's own rows (e.g. multiple
     medicines) contiguous — required for the patient-block merging further
-    down. Falls back to a combined Patient Name column if there's no
-    separate Last/First Name.
+    down. Columns are already canonical at this point (post-normalization).
     """
     df = df.copy()
-    source_col = find_column(df, ["Patient Source", "Source"])
-    last_col = find_column(df, ["Last Name"])
-    first_col = find_column(df, ["First Name"])
-    pin_col = find_column(df, ["Patient PIN", "PIN"])
-    name_col = find_column(df, ["Patient Name", "Full Name"])
-
-    df["_sort_source"] = (
-        df[source_col].astype(str).str.strip().str.lower() if source_col else ""
-    )
-
-    if last_col:
-        df["_sort_last"] = df[last_col].astype(str).str.strip().str.lower()
-    elif name_col:
-        df["_sort_last"] = df[name_col].astype(str).str.strip().str.lower()
-    else:
-        df["_sort_last"] = ""
-
-    df["_sort_first"] = (
-        df[first_col].astype(str).str.strip().str.lower() if first_col else ""
-    )
-    df["_sort_pin"] = df[pin_col].astype(str) if pin_col else ""
-
+    df["_sort_source"] = df["Patient Source"].astype(str).str.strip().str.lower()
+    df["_sort_last"] = df["Last Name"].astype(str).str.strip().str.lower()
+    df["_sort_first"] = df["First Name"].astype(str).str.strip().str.lower()
+    df["_sort_pin"] = df["Patient PIN"].astype(str)
     df = df.sort_values(
         by=["_sort_source", "_sort_last", "_sort_first", "_sort_pin"],
         kind="stable",
     ).reset_index(drop=True)
-    return df.drop(
-        columns=["_sort_source", "_sort_last", "_sort_first", "_sort_pin"]
-    )
+    return df.drop(columns=["_sort_source", "_sort_last", "_sort_first", "_sort_pin"])
 
 
-def process_rendered_medicines(df):
+def process_rendered_medicines(df_raw):
+    cols = _detect_columns(df_raw)
+
+    with st.expander("🔍 Detected column mapping (click to verify)"):
+        st.markdown(_mapping_summary(cols))
+
+    df = _normalize_to_output_schema(df_raw, cols)
     df = _sort_by_patient_source(df)
-
-    for date_col in ["Consultation Date", "Rendered Date"]:
-        if date_col in df.columns:
-            df[date_col] = (
-                pd.to_datetime(df[date_col], errors="coerce")
-                .dt.strftime("%m/%d/%Y")
-                .fillna("")
-            )
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -164,11 +314,7 @@ def process_rendered_medicines(df):
     block_start = 2
 
     for row_idx, row in df.iterrows():
-        pin = (
-            str(row["Patient PIN"])
-            if ("Patient PIN" in df.columns and pd.notna(row["Patient PIN"]))
-            else f"NO_PIN_{row_idx}"
-        )
+        pin = row["Patient PIN"] if row["Patient PIN"] else f"NO_PIN_{row_idx}"
         excel_row = row_idx + 2
         if current_pin is None:
             current_pin = pin
@@ -205,7 +351,7 @@ def process_rendered_medicines(df):
                 cell.alignment = align_right
             elif col_name in CENTERED_COLS:
                 cell.alignment = align_center
-                if col_name in ["Patient PIN", "Contact Number", "Cellphone Number"]:
+                if col_name in ["Patient PIN", "Contact Number"]:
                     cell.number_format = "@"
             else:
                 cell.alignment = align_left
@@ -293,7 +439,7 @@ def render_formatter_tab():
         """
     <div class="hero-tag hero-tag-blue">RENDERED MEDICINES</div>
     <div class="hero-title">Report Formatter</div>
-    <div class="hero-subtitle">Convert raw medicine reports into clean, professionally formatted Excel workbooks.</div>
+    <div class="hero-subtitle">Upload a raw medicine report in any column layout — we auto-detect, clean, and reformat it into a professional Excel workbook.</div>
     """,
         unsafe_allow_html=True,
     )
@@ -303,41 +449,34 @@ def render_formatter_tab():
     <div class="card-box">
         <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #0F172A;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="#2F5FE8"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
-            Required Excel (.xlsx) Column Structure
+            Output Column Structure
         </div>
         <div style="font-size: 13px; color: #64748B; margin-top: 4px;">
-            Ensure your uploaded spreadsheet contains the following standard headers:
+            Your file doesn't need to match this exactly — mixed-up order, extra columns, or slightly different header names (e.g. "Cellphone Number" instead of "Contact Number") are auto-detected and cleaned. The generated report always comes out as these columns, in this order:
         </div>
         <div class="columns-grid">
             <span class="column-tag">Patient Name</span>
+            <span class="column-tag">Last Name</span>
+            <span class="column-tag">First Name</span>
+            <span class="column-tag">Middle Name</span>
             <span class="column-tag">Patient PIN</span>
-            <span class="column-tag">Cellphone Number</span>
-            <span class="column-tag">Full Address</span>
             <span class="column-tag">Patient Source</span>
             <span class="column-tag">Consultation Date</span>
             <span class="column-tag">Rendered Date</span>
             <span class="column-tag">End Visit By</span>
-            <span class="column-tag">Dispensed By</span>
             <span class="column-tag">ICD10 Code</span>
             <span class="column-tag">ICD10 Description</span>
             <span class="column-tag">Medicine</span>
             <span class="column-tag">Medicine Category</span>
-            <span class="column-tag">Yakap Status</span>
-            <span class="column-tag">Pharmacy</span>
             <span class="column-tag">Qty Prescribed</span>
             <span class="column-tag">Qty Dispensed</span>
             <span class="column-tag">Cost</span>
             <span class="column-tag">Price</span>
             <span class="column-tag">Total Cost</span>
             <span class="column-tag">Total Price</span>
-            <span class="column-tag">First Name</span>
-            <span class="column-tag">Middle Name</span>
-            <span class="column-tag">Last Name</span>
-            <span class="column-tag">Suffix Name</span>
-            <span class="column-tag">Street Name</span>
-            <span class="column-tag">Barangay</span>
-            <span class="column-tag">Municipality</span>
-            <span class="column-tag">Province</span>
+            <span class="column-tag">Contact Number</span>
+            <span class="column-tag">Address</span>
+            <span class="column-tag">Notes</span>
         </div>
     </div>
     """,
@@ -385,7 +524,7 @@ def render_formatter_tab():
 
     if uploaded_file and btn_click:
         st.session_state["t1_processed"] = True
-        with st.spinner("Formatting workbook..."):
+        with st.spinner("Cleaning and formatting workbook..."):
             file_bytes = uploaded_file.read()
             df_raw = pd.read_excel(io.BytesIO(file_bytes))
             st.session_state["t1_buffer"] = process_rendered_medicines(df_raw)

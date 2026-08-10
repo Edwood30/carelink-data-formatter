@@ -62,3 +62,61 @@ def clean_filename(user_input, default_name):
     if not name.lower().endswith(".xlsx"):
         name += ".xlsx"
     return name
+
+
+def clean_str(val):
+    """NaN-safe strip; also collapses internal double-spaces some exports have."""
+    if pd.isna(val):
+        return ""
+    s = str(val).strip()
+    while "  " in s:
+        s = s.replace("  ", " ")
+    return s
+
+
+def clean_pin(val):
+    """Strips a PIN and removes the trailing '.0' Excel/pandas sometimes adds
+    when a numeric-looking ID column gets read in as a float."""
+    s = clean_str(val)
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
+
+def clean_date(val):
+    """Parses any recognizable date value and returns it as MM/DD/YYYY, or ''
+    if it can't be parsed (blank/garbage input)."""
+    parsed = pd.to_datetime(val, errors="coerce")
+    return parsed.strftime("%m/%d/%Y") if pd.notna(parsed) else ""
+
+
+def clean_number(val):
+    """Coerces a value to a plain number for qty/cost/price columns; returns
+    '' (blank cell) if it isn't numeric at all."""
+    if pd.isna(val) or str(val).strip() == "":
+        return ""
+    try:
+        n = float(str(val).replace(",", "").strip())
+        return int(n) if n == int(n) else n
+    except (ValueError, TypeError):
+        return ""
+
+
+def split_name_fallback(name):
+    """Best-effort split of a single combined name field into Last/First/Middle."""
+    name = clean_str(name)
+    if not name:
+        return "", "", ""
+    if "," in name:
+        last, rest = name.split(",", 1)
+        rest_parts = rest.strip().split()
+        first = rest_parts[0] if rest_parts else ""
+        middle = " ".join(rest_parts[1:]) if len(rest_parts) > 1 else ""
+        return last.strip(), first, middle
+    parts = name.split()
+    if len(parts) == 1:
+        return "", parts[0], ""
+    first = parts[0]
+    last = parts[-1]
+    middle = " ".join(parts[1:-1])
+    return last, first, middle
