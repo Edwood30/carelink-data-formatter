@@ -1,6 +1,8 @@
 """
 Shared helper functions used by both CareLink features.
 """
+import re
+
 import pandas as pd
 
 
@@ -100,6 +102,15 @@ def clean_number(val):
         return int(n) if n == int(n) else n
     except (ValueError, TypeError):
         return ""
+
+
+def sanitize_filename_part(s):
+    """Strips characters that aren't safe in a filename, for building a
+    filename out of arbitrary data (e.g. a Patient Source value)."""
+    s = str(s or "").strip()
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s if s else "Unspecified Source"
 
 
 def split_name_fallback(name):
