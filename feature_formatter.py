@@ -438,47 +438,8 @@ def render_formatter_tab():
     st.markdown(
         """
     <div class="hero-tag hero-tag-blue">RENDERED MEDICINES</div>
-    <div class="hero-title">Report Formatter</div>
+    <div class="hero-title">App Data Report</div>
     <div class="hero-subtitle">Upload a raw medicine report in any column layout — we auto-detect, clean, and reformat it into a professional Excel workbook.</div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-    <div class="card-box">
-        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #0F172A;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#2F5FE8"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
-            Output Column Structure
-        </div>
-        <div style="font-size: 13px; color: #64748B; margin-top: 4px;">
-            Your file doesn't need to match this exactly — mixed-up order, extra columns, or slightly different header names (e.g. "Cellphone Number" instead of "Contact Number") are auto-detected and cleaned. The generated report always comes out as these columns, in this order:
-        </div>
-        <div class="columns-grid">
-            <span class="column-tag">Patient Name</span>
-            <span class="column-tag">Last Name</span>
-            <span class="column-tag">First Name</span>
-            <span class="column-tag">Middle Name</span>
-            <span class="column-tag">Patient PIN</span>
-            <span class="column-tag">Patient Source</span>
-            <span class="column-tag">Consultation Date</span>
-            <span class="column-tag">Rendered Date</span>
-            <span class="column-tag">End Visit By</span>
-            <span class="column-tag">ICD10 Code</span>
-            <span class="column-tag">ICD10 Description</span>
-            <span class="column-tag">Medicine</span>
-            <span class="column-tag">Medicine Category</span>
-            <span class="column-tag">Qty Prescribed</span>
-            <span class="column-tag">Qty Dispensed</span>
-            <span class="column-tag">Cost</span>
-            <span class="column-tag">Price</span>
-            <span class="column-tag">Total Cost</span>
-            <span class="column-tag">Total Price</span>
-            <span class="column-tag">Contact Number</span>
-            <span class="column-tag">Address</span>
-            <span class="column-tag">Notes</span>
-        </div>
-    </div>
     """,
         unsafe_allow_html=True,
     )
