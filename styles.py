@@ -86,31 +86,20 @@ header[data-testid="stHeader"] {
     display: block !important;
 }
 
-/* Section Titles */
-.hero-tag {
-    font-size: 11px;
+/* Section heading — plain, utilitarian (no oversized marketing type) */
+.section-heading {
+    font-size: 16px;
     font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-bottom: 4px;
-}
-.hero-tag-blue { color: #2F5FE8; }
-.hero-tag-green { color: #16213E; }
-
-.hero-title {
-    font-size: 32px;
-    font-weight: 800;
     color: #0F172A;
-    margin-bottom: 6px;
-    line-height: 1.1;
-    letter-spacing: -0.02em;
+    margin-bottom: 4px;
+    letter-spacing: -0.01em;
 }
 
-.hero-subtitle {
-    font-size: 14px;
+.section-subtext {
+    font-size: 13px;
     color: #64748B;
     line-height: 1.5;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
 }
 
 /* Card Container Base */
@@ -228,18 +217,6 @@ div[data-baseweb="input"] input {
     background-color: #F1F5F9;
     color: #94A3B8;
     border: 1px solid #E2E8F0;
-}
-
-/* Upload label above a dropzone ("Upload a [X] file") */
-.upload-label {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: #0F172A;
-    margin-bottom: 10px;
-}
-.upload-label-accent {
-    color: #2F5FE8;
-    font-weight: 700;
 }
 
 /* Tabs Styling — segmented pill toggle.

@@ -14,6 +14,7 @@ cleans it, and always produces the same fixed 22-column report:
     Contact Number, Address, Notes
 """
 import io
+import zipfile
 
 import openpyxl
 import pandas as pd
@@ -254,7 +255,7 @@ def process_rendered_medicines(df_raw):
     """
     cols = _detect_columns(df_raw)
 
-    with st.expander("🔍 Detected column mapping (click to verify)"):
+    with st.expander("Detected column mapping (click to verify)"):
         st.markdown(_mapping_summary(cols))
 
     df = _normalize_to_output_schema(df_raw, cols)
@@ -452,72 +453,54 @@ def _build_workbook(df):
     return output_buffer
 
 
+def _build_zip(selected_reports):
+    """Bundles a list of (source_label, row_count, buffer) tuples into a
+    single in-memory ZIP for bulk download."""
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for source_label, _row_count, buffer in selected_reports:
+            file_name = f"CareLinkExpress-Data-{sanitize_filename_part(source_label)}.xlsx"
+            buffer.seek(0)
+            zf.writestr(file_name, buffer.read())
+            buffer.seek(0)
+    zip_buffer.seek(0)
+    return zip_buffer
+
+
 def render_formatter_tab():
     """Draws the full 'CareLink Express Data' tab UI and wires up processing."""
     st.markdown(
         """
-    <div class="hero-tag hero-tag-blue">RENDERED MEDICINES</div>
-    <div class="hero-title">Report Formatter</div>
-    <div class="hero-subtitle">Upload a raw medicine report in any column layout — we auto-detect, clean, and reformat it into a professional Excel workbook.</div>
+    <div class="section-heading">Rendered Medicines Formatter</div>
+    <div class="section-subtext">Upload a raw medicine report — column layout, naming, and order don't matter. We auto-detect and clean the data, then generate one output file per Patient Source.</div>
     """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        """
-    <div class="card-box">
-        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: #0F172A;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="#2F5FE8"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h10v2H7V7zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
-            Output Column Structure
-        </div>
-        <div style="font-size: 13px; color: #64748B; margin-top: 4px;">
-            Your file doesn't need to match this exactly — mixed-up order, extra columns, or slightly different header names (e.g. "Cellphone Number" instead of "Contact Number") are auto-detected and cleaned. A separate output file is generated for each Patient Source found in your upload, and always comes out as these columns, in this order:
-        </div>
-        <div class="columns-grid">
-            <span class="column-tag">Patient Name</span>
-            <span class="column-tag">Last Name</span>
-            <span class="column-tag">First Name</span>
-            <span class="column-tag">Middle Name</span>
-            <span class="column-tag">Patient PIN</span>
-            <span class="column-tag">Patient Source</span>
-            <span class="column-tag">Consultation Date</span>
-            <span class="column-tag">Rendered Date</span>
-            <span class="column-tag">End Visit By</span>
-            <span class="column-tag">ICD10 Code</span>
-            <span class="column-tag">ICD10 Description</span>
-            <span class="column-tag">Medicine</span>
-            <span class="column-tag">Medicine Category</span>
-            <span class="column-tag">Qty Prescribed</span>
-            <span class="column-tag">Qty Dispensed</span>
-            <span class="column-tag">Cost</span>
-            <span class="column-tag">Price</span>
-            <span class="column-tag">Total Cost</span>
-            <span class="column-tag">Total Price</span>
-            <span class="column-tag">Contact Number</span>
-            <span class="column-tag">Address</span>
-            <span class="column-tag">Notes</span>
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
+    uploaded_file = st.file_uploader(
+        "Upload a CareLink Express file",
+        type=["xlsx"],
+        key="single_fmt",
+        label_visibility="visible",
     )
 
-    with st.container():
-        st.markdown(
-            '<div class="upload-label">Upload a <span class="upload-label-accent">CareLink Express</span> file</div>',
-            unsafe_allow_html=True,
-        )
-        uploaded_file = st.file_uploader(
-            "Drop your file here",
-            type=["xlsx"],
-            key="single_fmt",
-            label_visibility="collapsed",
-        )
+    # Uploading a new file, or removing the current one (the uploader's own
+    # "x"), invalidates any previously generated output so a stale report
+    # can never be shown next to the wrong (or no) source file.
+    file_signature = (
+        f"{getattr(uploaded_file, 'file_id', None) or uploaded_file.name}-{uploaded_file.size}"
+        if uploaded_file
+        else None
+    )
+    if st.session_state.get("t1_file_signature") != file_signature:
+        st.session_state["t1_file_signature"] = file_signature
+        st.session_state["t1_processed"] = False
+        st.session_state["t1_reports"] = None
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     btn_click = st.button(
-        "Generate →",
+        "Generate",
         key="btn_gen_tab1",
         disabled=(uploaded_file is None),
     )
@@ -530,33 +513,86 @@ def render_formatter_tab():
             st.session_state["t1_reports"] = process_rendered_medicines(df_raw)
 
     reports = st.session_state.get("t1_reports")
-    if st.session_state.get("t1_processed") and reports:
-        n = len(reports)
+    if not (st.session_state.get("t1_processed") and reports):
+        return
+
+    n = len(reports)
+    st.markdown(
+        f"""
+    <div class="success-banner">
+        Generated {n} output file{'s' if n != 1 else ''} — one per Patient Source.
+    </div>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col_search, col_all = st.columns([3, 1.2])
+    with col_search:
+        search_term = st.text_input(
+            "Search sources",
+            placeholder="Search by source name…",
+            key="t1_search",
+            label_visibility="collapsed",
+        ) if n > 5 else ""
+    with col_all:
+        st.download_button(
+            label="Download all (.zip)",
+            data=_build_zip(reports),
+            file_name="CareLinkExpress-AllSources.zip",
+            mime="application/zip",
+            key="dl_tab1_all",
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    search_lower = (search_term or "").strip().lower()
+    visible_indices = [
+        idx
+        for idx, (source_label, _rc, _buf) in enumerate(reports)
+        if search_lower in source_label.lower()
+    ]
+
+    if search_lower and not visible_indices:
         st.markdown(
-            f"""
-        <div class="success-banner">
-            ✓ Generated {n} output file{'s' if n != 1 else ''} — one per Patient Source.
-        </div>
-        """,
+            '<div class="card-title">No sources match your search.</div>',
             unsafe_allow_html=True,
         )
 
-        st.markdown("<br>", unsafe_allow_html=True)
+    selected_indices = []
+    for idx in visible_indices:
+        source_label, row_count, buffer = reports[idx]
+        file_name = f"CareLinkExpress-Data-{sanitize_filename_part(source_label)}.xlsx"
+        col_check, col_label, col_btn = st.columns([0.4, 3.1, 1.2])
+        with col_check:
+            checked = st.checkbox(
+                "Select", key=f"sel_tab1_{idx}", label_visibility="collapsed"
+            )
+            if checked:
+                selected_indices.append(idx)
+        with col_label:
+            st.markdown(
+                f'<div class="card-title" style="margin-bottom:0;">{source_label} '
+                f'<span style="color:#94A3B8;font-weight:400;">({row_count} row{"s" if row_count != 1 else ""})</span></div>',
+                unsafe_allow_html=True,
+            )
+        with col_btn:
+            st.download_button(
+                label="Download",
+                data=buffer,
+                file_name=file_name,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"dl_tab1_{idx}",
+            )
 
-        for idx, (source_label, row_count, buffer) in enumerate(reports):
-            file_name = f"CareLinkExpress-Data-{sanitize_filename_part(source_label)}.xlsx"
-            col_label, col_btn = st.columns([3.5, 1.2])
-            with col_label:
-                st.markdown(
-                    f'<div class="card-title" style="margin-bottom:0;">📄 Output — {source_label} '
-                    f'<span style="color:#94A3B8;font-weight:400;">({row_count} row{"s" if row_count != 1 else ""})</span></div>',
-                    unsafe_allow_html=True,
-                )
-            with col_btn:
-                st.download_button(
-                    label="📥 Download",
-                    data=buffer,
-                    file_name=file_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key=f"dl_tab1_{idx}",
-                )
+    if selected_indices:
+        st.markdown("<br>", unsafe_allow_html=True)
+        selected_reports = [reports[i] for i in selected_indices]
+        st.download_button(
+            label=f"Download {len(selected_indices)} selected (.zip)",
+            data=_build_zip(selected_reports),
+            file_name="CareLinkExpress-Selected.zip",
+            mime="application/zip",
+            key="dl_tab1_selected",
+        )

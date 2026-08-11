@@ -91,15 +91,9 @@ _header_icon_html = (
 
 st.markdown(
     f"""
-<div class="app-header-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:20px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;">
-    <div class="app-header-left" style="display:flex;align-items:center;gap:12px;">
-        <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex-shrink:0;overflow:hidden;border-radius:9px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
-        <div>
-            <div class="app-header-title" style="font-size:17px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting Suite</div>
-            <div class="app-header-subtitle" style="font-size:12.5px;color:#64748B;line-height:1.4;">Upload CareLink reports, get clean formatted spreadsheets.</div>
-        </div>
-    </div>
-    <span class="pill-badge pill-active-blue app-header-badge" style="flex-shrink:0;margin-top:2px;">CARELINK OPS</span>
+<div class="app-header-row" style="display:flex;align-items:center;justify-content:flex-start;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;">
+    <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;overflow:hidden;border-radius:8px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
+    <div class="app-header-title" style="font-size:16px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting</div>
 </div>
 """,
     unsafe_allow_html=True,
@@ -120,7 +114,7 @@ if not LOGO_DATA_URI:
             "and restart the app."
         )
 
-tab1, tab2 = st.tabs(["📄 CareLink Express Data", "⊕ CareLink Coordinator Data"])
+tab1, tab2 = st.tabs(["CareLink Express Data", "CareLink Coordinator Data"])
 
 with tab1:
     render_formatter_tab()

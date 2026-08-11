@@ -410,7 +410,7 @@ def process_and_merge(df_med, df_patient):
     rendered_records = _sort_records_alphabetically(rendered_records)
     missing_records = sorted(missing_records, key=_last_first_key)
 
-    with st.expander("🔍 Detected column mapping (click to verify)"):
+    with st.expander("Detected column mapping (click to verify)"):
         st.markdown(
             f"""
 **Rendered Medicines file**
@@ -449,9 +449,8 @@ def render_merger_tab():
     """Draws the full 'CareLink Coordinator Data' tab UI and wires up processing."""
     st.markdown(
         """
-    <div class="hero-tag hero-tag-green">AUTOMATED LOOKUP</div>
-    <div class="hero-title">Merge Contacts & Medicines</div>
-    <div class="hero-subtitle">Upload <strong>Rendered Medicines</strong> and <strong>Registered Patients</strong> files. Produces a workbook with a Rendered Medicines sheet and a Registered-but-Not-Rendered sheet.</div>
+    <div class="section-heading">Merge Contacts &amp; Medicines</div>
+    <div class="section-subtext">Upload <strong>Rendered Medicines</strong> and <strong>Registered Patients</strong> files. Produces a workbook with a Rendered Medicines sheet and a Registered-but-Not-Rendered sheet.</div>
     """,
         unsafe_allow_html=True,
     )
@@ -492,6 +491,17 @@ def render_merger_tab():
             label_visibility="collapsed",
         )
 
+    # Removing or swapping either file (via the uploader's own "x")
+    # invalidates any previously generated output, same as Express.
+    def _sig(f):
+        return f"{getattr(f, 'file_id', None) or f.name}-{f.size}" if f else None
+
+    file_signature = (_sig(file_med), _sig(file_patient))
+    if st.session_state.get("t2_file_signature") != file_signature:
+        st.session_state["t2_file_signature"] = file_signature
+        st.session_state["t2_processed"] = False
+        st.session_state["t2_buffer"] = None
+
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
@@ -527,7 +537,7 @@ def render_merger_tab():
     with c_action:
         both_uploaded = (file_med is not None) and (file_patient is not None)
         btn_click = st.button(
-            "Run Merge →", key="btn_gen_tab2", disabled=not both_uploaded
+            "Run Merge", key="btn_gen_tab2", disabled=not both_uploaded
         )
 
     if both_uploaded and btn_click:
@@ -542,14 +552,14 @@ def render_merger_tab():
         st.markdown(
             f"""
         <div class="success-banner">
-            ✅ <strong>{out_name}</strong> generated — includes a "Rendered Medicines" sheet and a "Registered - Not Rendered" sheet.
+            <strong>{out_name}</strong> generated — includes a "Rendered Medicines" sheet and a "Registered - Not Rendered" sheet.
         </div>
         """,
             unsafe_allow_html=True,
         )
 
         st.download_button(
-            label="📥 Download Merged Tracking Workbook (.xlsx)",
+            label="Download Merged Tracking Workbook (.xlsx)",
             data=st.session_state["t2_buffer"],
             file_name=out_name,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
