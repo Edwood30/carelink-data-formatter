@@ -467,6 +467,52 @@ def _build_zip(selected_reports):
     return zip_buffer
 
 
+_SOURCE_ICON_SVG = (
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/>'
+    '<path d="M9 9h1"/><path d="M14 9h1"/><path d="M9 13h1"/><path d="M14 13h1"/>'
+    '<path d="M9 21v-4h6v4"/></svg>'
+)
+
+
+def _reset_selection_state():
+    """Clears the permanent selection set, per-row checkbox widget state,
+    and Select All — called whenever the set of generated reports changes
+    (new upload, new Generate click) so a stale selection from a previous
+    file can never carry over."""
+    st.session_state["t1_selected"] = set()
+    for key in list(st.session_state.keys()):
+        if key.startswith("sel_tab1_"):
+            del st.session_state[key]
+    st.session_state["t1_select_all"] = False
+
+
+def _sync_select_all_flag():
+    reports = st.session_state.get("t1_reports") or []
+    selected = st.session_state.get("t1_selected", set())
+    st.session_state["t1_select_all"] = bool(reports) and len(selected) == len(reports)
+
+
+def _on_source_checkbox_change(idx):
+    selected = st.session_state.setdefault("t1_selected", set())
+    if st.session_state.get(f"sel_tab1_{idx}"):
+        selected.add(idx)
+    else:
+        selected.discard(idx)
+    _sync_select_all_flag()
+
+
+def _on_select_all_toggle():
+    reports = st.session_state.get("t1_reports") or []
+    selected = st.session_state.setdefault("t1_selected", set())
+    if st.session_state.get("t1_select_all"):
+        selected.clear()
+        selected.update(range(len(reports)))
+    else:
+        selected.clear()
+
+
 def render_formatter_tab():
     """Draws the full 'CareLink Express Data' tab UI and wires up processing."""
     st.markdown(
@@ -496,6 +542,7 @@ def render_formatter_tab():
         st.session_state["t1_file_signature"] = file_signature
         st.session_state["t1_processed"] = False
         st.session_state["t1_reports"] = None
+        _reset_selection_state()
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -507,10 +554,18 @@ def render_formatter_tab():
 
     if uploaded_file and btn_click:
         st.session_state["t1_processed"] = True
-        with st.spinner("Cleaning, formatting, and splitting by Patient Source..."):
-            file_bytes = uploaded_file.read()
-            df_raw = pd.read_excel(io.BytesIO(file_bytes))
-            st.session_state["t1_reports"] = process_rendered_medicines(df_raw)
+        try:
+            with st.spinner("Cleaning, formatting, and splitting by Patient Source..."):
+                file_bytes = uploaded_file.read()
+                df_raw = pd.read_excel(io.BytesIO(file_bytes))
+                st.session_state["t1_reports"] = process_rendered_medicines(df_raw)
+            _reset_selection_state()
+        except Exception:
+            st.session_state["t1_reports"] = None
+            st.error(
+                "Unable to process this file. Please verify that the file "
+                "format and contents are correct."
+            )
 
     reports = st.session_state.get("t1_reports")
     if not (st.session_state.get("t1_processed") and reports):
@@ -527,32 +582,32 @@ def render_formatter_tab():
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<div class="card-title" style="margin-bottom:8px;">Outputs by Source</div>', unsafe_allow_html=True)
 
-    col_search, col_all = st.columns([3, 1.2])
+    col_search, col_zip = st.columns([3, 1.6])
     with col_search:
         search_term = st.text_input(
             "Search sources",
             placeholder="Search by source name…",
             key="t1_search",
             label_visibility="collapsed",
-        ) if n > 5 else ""
-    with col_all:
-        st.download_button(
-            label="Download all (.zip)",
-            data=_build_zip(reports),
-            file_name="CareLinkExpress-AllSources.zip",
-            mime="application/zip",
-            key="dl_tab1_all",
         )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    selected_indices = sorted(st.session_state.get("t1_selected", set()))
+    with col_zip:
+        st.download_button(
+            label=f"Download selected ({len(selected_indices)})",
+            data=_build_zip([reports[i] for i in selected_indices]) if selected_indices else b"",
+            file_name="CareLinkExpress-Selected.zip",
+            mime="application/zip",
+            key="dl_tab1_selected",
+            disabled=(len(selected_indices) == 0),
+        )
+
+    st.checkbox("Select All", key="t1_select_all", on_change=_on_select_all_toggle)
 
     search_lower = (search_term or "").strip().lower()
-    visible_indices = [
-        idx
-        for idx, (source_label, _rc, _buf) in enumerate(reports)
-        if search_lower in source_label.lower()
-    ]
+    visible_indices = [i for i in range(n) if search_lower in reports[i][0].lower()]
 
     if search_lower and not visible_indices:
         st.markdown(
@@ -560,21 +615,36 @@ def render_formatter_tab():
             unsafe_allow_html=True,
         )
 
-    selected_indices = []
+    if visible_indices:
+        hc_check, hc_source, hc_action = st.columns([0.4, 3.1, 1.2])
+        with hc_source:
+            st.markdown('<div class="source-list-header"><span>SOURCE</span></div>', unsafe_allow_html=True)
+        with hc_action:
+            st.markdown('<div class="source-list-header"><span>ACTION</span></div>', unsafe_allow_html=True)
+
+    selected_set = st.session_state.get("t1_selected", set())
     for idx in visible_indices:
         source_label, row_count, buffer = reports[idx]
         file_name = f"CareLinkExpress-Data-{sanitize_filename_part(source_label)}.xlsx"
         col_check, col_label, col_btn = st.columns([0.4, 3.1, 1.2])
         with col_check:
-            checked = st.checkbox(
-                "Select", key=f"sel_tab1_{idx}", label_visibility="collapsed"
+            # Force-sync from the permanent selection set on every render.
+            # A checkbox's own widget state is NOT reliably preserved by
+            # Streamlit across a run where it wasn't drawn at all (e.g.
+            # hidden by the search filter), so this set is the real source
+            # of truth, not the checkbox's key.
+            st.session_state[f"sel_tab1_{idx}"] = idx in selected_set
+            st.checkbox(
+                "Select",
+                key=f"sel_tab1_{idx}",
+                label_visibility="collapsed",
+                on_change=_on_source_checkbox_change,
+                args=(idx,),
             )
-            if checked:
-                selected_indices.append(idx)
         with col_label:
             st.markdown(
-                f'<div class="card-title" style="margin-bottom:0;">{source_label} '
-                f'<span style="color:#94A3B8;font-weight:400;">({row_count} row{"s" if row_count != 1 else ""})</span></div>',
+                f'<div class="source-row"><span class="source-row-name">{_SOURCE_ICON_SVG} {source_label} '
+                f'<span class="source-row-count">({row_count} row{"s" if row_count != 1 else ""})</span></span></div>',
                 unsafe_allow_html=True,
             )
         with col_btn:
@@ -585,14 +655,3 @@ def render_formatter_tab():
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key=f"dl_tab1_{idx}",
             )
-
-    if selected_indices:
-        st.markdown("<br>", unsafe_allow_html=True)
-        selected_reports = [reports[i] for i in selected_indices]
-        st.download_button(
-            label=f"Download {len(selected_indices)} selected (.zip)",
-            data=_build_zip(selected_reports),
-            file_name="CareLinkExpress-Selected.zip",
-            mime="application/zip",
-            key="dl_tab1_selected",
-        )

@@ -59,16 +59,17 @@ header[data-testid="stHeader"] {
 }
 
 .app-header-title {
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 700;
     color: #0F172A;
     line-height: 1.25;
 }
 
 .app-header-subtitle {
-    font-size: 12.5px;
+    font-size: 12px;
     color: #64748B;
-    line-height: 1.4;
+    line-height: 1.3;
+    margin-top: 1px;
 }
 
 .app-header-badge {
@@ -120,21 +121,6 @@ header[data-testid="stHeader"] {
 }
 
 /* Instruction Tags Grid */
-.columns-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 12px;
-}
-.column-tag {
-    background-color: #F8FAFC;
-    color: #475569;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 12px;
-    border-radius: 6px;
-    border: 1px solid #E2E8F0;
-}
 
 /* File Upload Display Box */
 .uploader-card {
@@ -157,6 +143,50 @@ header[data-testid="stHeader"] {
     font-size: 13px;
     color: #475569;
     margin-bottom: 12px;
+}
+
+.uploader-accent-blue { color: #2F5FE8; }
+.uploader-accent-green { color: #16213E; }
+
+/* Outputs-by-source list */
+.source-list-header {
+    display: flex;
+    align-items: center;
+    padding: 4px 4px 8px 4px;
+    border-bottom: 1px solid #E2E8F0;
+    margin-bottom: 4px;
+}
+.source-list-header span {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #94A3B8;
+}
+
+.source-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 4px;
+}
+.source-row-name {
+    font-size: 13.5px;
+    color: #0F172A;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+}
+.source-row-count {
+    color: #94A3B8;
+    font-weight: 400;
+    font-size: 12.5px;
+}
+.source-icon {
+    color: #94A3B8;
+    flex-shrink: 0;
+    display: inline-flex;
 }
 
 .fake-upload-slot {
@@ -414,6 +444,11 @@ div.stButton > button:disabled {
     color: #64748B !important;
     box-shadow: none !important;
     cursor: not-allowed;
+}
+
+/* Compact checkboxes for the outputs-by-source list */
+[data-testid="stCheckbox"] {
+    padding-top: 6px;
 }
 
 /* Banner */

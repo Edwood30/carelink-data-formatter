@@ -93,7 +93,10 @@ st.markdown(
     f"""
 <div class="app-header-row" style="display:flex;align-items:center;justify-content:flex-start;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;">
     <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;overflow:hidden;border-radius:8px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
-    <div class="app-header-title" style="font-size:16px;font-weight:700;color:#0F172A;line-height:1.25;">CareLink Data Formatting</div>
+    <div>
+        <div class="app-header-title">CareLink Data Formatting</div>
+        <div class="app-header-subtitle">Format and organize data for CareLink Express and Coordinator systems.</div>
+    </div>
 </div>
 """,
     unsafe_allow_html=True,
