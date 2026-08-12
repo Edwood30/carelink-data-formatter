@@ -14,6 +14,7 @@ import os
 
 import streamlit as st
 
+from feature_checklist import render_checklist_tab
 from feature_formatter import render_formatter_tab
 from feature_merger import render_merger_tab
 from styles import inject_custom_css, inject_uploader_tweaks
@@ -117,10 +118,15 @@ if not LOGO_DATA_URI:
             "and restart the app."
         )
 
-tab1, tab2 = st.tabs(["CareLink Express Data", "CareLink Coordinator Data"])
+tab1, tab2, tab3 = st.tabs(
+    ["CareLink Express Data", "CareLink Coordinator Data", "CareLink Checklist Data"]
+)
 
 with tab1:
     render_formatter_tab()
 
 with tab2:
     render_merger_tab()
+
+with tab3:
+    render_checklist_tab()
