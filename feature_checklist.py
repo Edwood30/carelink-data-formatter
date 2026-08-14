@@ -48,13 +48,13 @@ def _build_rendered_rows(df_med):
 
         if key not in by_pin:
             by_pin[key] = {
-                "Last Name": last,
-                "First Name": first,
-                "Middle Name": middle,
-                "Cellphone Number": format_contact_number(_get(row, cols["phone"])) if cols["phone"] else "",
-                "Full Address": clean_str(_get(row, cols["address"])) if cols["address"] else "",
-                "Patient Source": clean_str(_get(row, cols["source"])) if cols["source"] else "",
-                "Notes": clean_str(_get(row, cols["notes"])) if cols["notes"] else "",
+                "LAST NAME": last,
+                "FIRST NAME": first,
+                "MIDDLE NAME": middle,
+                "CONTACT NUMBER": format_contact_number(_get(row, cols["phone"])) if cols["phone"] else "",
+                "ADDRESS": clean_str(_get(row, cols["address"])) if cols["address"] else "",
+                "PATIENT SOURCE": clean_str(_get(row, cols["source"])) if cols["source"] else "",
+                "NOTES": clean_str(_get(row, cols["notes"])) if cols["notes"] else "",
                 "_medicines": [],
                 "_pin": pin,
             }
@@ -63,8 +63,8 @@ def _build_rendered_rows(df_med):
         medicine = clean_str(_get(row, cols["medicine"])) if cols["medicine"] else ""
         if medicine and medicine not in by_pin[key]["_medicines"]:
             by_pin[key]["_medicines"].append(medicine)
-        if not by_pin[key]["Patient Source"] and cols["source"]:
-            by_pin[key]["Patient Source"] = clean_str(_get(row, cols["source"]))
+        if not by_pin[key]["PATIENT SOURCE"] and cols["source"]:
+            by_pin[key]["PATIENT SOURCE"] = clean_str(_get(row, cols["source"]))
 
     return by_pin, order, cols
 
@@ -81,7 +81,7 @@ def build_checklist_rows_by_source(df_med, df_patient):
     if patient_lookup is None:
         return None, None, med_cols, None, 0
 
-    # Build a source lookup directly from the Registered Patients file
+    # Build source lookup directly from Registered Patients file
     pat_cols = _detect_columns(df_patient)
     patient_source_map = {}
 
@@ -95,55 +95,55 @@ def build_checklist_rows_by_source(df_med, df_patient):
     all_rows = []
     seen_pins = set()
 
-    # Process patients from the Rendered Medicines file
+    # Process patients from Rendered Medicines
     for key in order:
         info = by_pin[key]
         pin = info["_pin"]
         if pin:
             seen_pins.add(pin)
 
-        # Prefer source from rendered medicines, fallback to registered patients file
-        source = info["Patient Source"] or patient_source_map.get(pin, "")
+        source = info["PATIENT SOURCE"] or patient_source_map.get(pin, "")
 
         all_rows.append(
             {
-                "Last Name": info["Last Name"],
-                "First Name": info["First Name"],
-                "Middle Name": info["Middle Name"],
-                "Cellphone Number": info["Cellphone Number"],
-                "Full Address": info["Full Address"],
-                "Medicines rendered": ", ".join(info["_medicines"]),
-                "Patient Source": source,
-                "Notes": info["Notes"],
+                "PATIENT SOURCE": source,
+                "CONTACT NUMBER": info["CONTACT NUMBER"],
+                "LAST NAME": info["LAST NAME"],
+                "FIRST NAME": info["FIRST NAME"],
+                "MIDDLE NAME": info["MIDDLE NAME"],
+                "ADDRESS": info["ADDRESS"],
+                "NOTES": info["NOTES"],
+                "MEDICINE RENDERED": ", ".join(info["_medicines"]),
+                "WAYBILL": False,
             }
         )
 
-    # Process remaining registered patients awaiting follow-up (no medicines rendered)
+    # Process remaining registered patients awaiting follow-up
     for pin, info in patient_lookup.items():
         if pin in seen_pins:
             continue
 
-        # Map source from registered patients file
         source = patient_source_map.get(pin, "")
 
         all_rows.append(
             {
-                "Last Name": info["Last Name"],
-                "First Name": info["First Name"],
-                "Middle Name": info["Middle Name"],
-                "Cellphone Number": info["Contact Number"],
-                "Full Address": info["Full Address"],
-                "Medicines rendered": "",
-                "Patient Source": source,
-                "Notes": "",
+                "PATIENT SOURCE": source,
+                "CONTACT NUMBER": info.get("Contact Number", ""),
+                "LAST NAME": info.get("Last Name", ""),
+                "FIRST NAME": info.get("First Name", ""),
+                "MIDDLE NAME": info.get("Middle Name", ""),
+                "ADDRESS": info.get("Full Address", ""),
+                "NOTES": "",
+                "MEDICINE RENDERED": "",
+                "WAYBILL": False,
             }
         )
 
-    all_rows.sort(key=lambda r: (r["Last Name"].strip().lower(), r["First Name"].strip().lower()))
+    all_rows.sort(key=lambda r: (r["LAST NAME"].strip().lower(), r["FIRST NAME"].strip().lower()))
 
     rows_by_source = {}
     for row in all_rows:
-        source_label = row["Patient Source"].strip() or "Unspecified Source"
+        source_label = row["PATIENT SOURCE"].strip() or "Unspecified Source"
         rows_by_source.setdefault(source_label, []).append(row)
 
     return rows_by_source, seen_pins, med_cols, patient_meta, len(all_rows)

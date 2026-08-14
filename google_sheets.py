@@ -89,20 +89,20 @@ def _sanitize_sheet_title(s):
 
 def _row_to_values(row):
     mapping = {
-        "PATIENT SOURCE": row.get("Patient Source", ""),
-        "CONTACT NUMBER": row.get("Cellphone Number", ""),
-        "LAST NAME": row.get("Last Name", ""),
-        "FIRST NAME": row.get("First Name", ""),
-        "MIDDLE NAME": row.get("Middle Name", ""),
-        "ADDRESS": row.get("Full Address", ""),
+        "PATIENT SOURCE": row.get("PATIENT SOURCE", row.get("Patient Source", "")),
+        "CONTACT NUMBER": row.get("CONTACT NUMBER", row.get("Cellphone Number", "")),
+        "LAST NAME": row.get("LAST NAME", row.get("Last Name", "")),
+        "FIRST NAME": row.get("FIRST NAME", row.get("First Name", "")),
+        "MIDDLE NAME": row.get("MIDDLE NAME", row.get("Middle Name", "")),
+        "ADDRESS": row.get("ADDRESS", row.get("Full Address", "")),
         "1ST CONTACT": "",
-        "NOTES": row.get("Notes", ""),
+        "NOTES": row.get("NOTES", row.get("Notes", "")),
         "CONSULT": "",
-        "MEDICINE RENDERED": row.get("Medicines rendered", ""),
+        "MEDICINE RENDERED": row.get("MEDICINE RENDERED", row.get("Medicines rendered", "")),
         "PRESCRIBED": "",
         "PACKED": "",
         "2ND CONTACT": "",
-        "WAYBILL": False,  # Default unchecked
+        "WAYBILL": False,  # Default unchecked boolean for Google Sheets
     }
     return [mapping.get(h, "") for h in CHECKLIST_HEADERS]
 
@@ -195,9 +195,8 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
 
 
 def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_idx):
-    """Highlights the ENTIRE row in soft green when the Waybill checkbox is checked (TRUE)."""
-    # Convert 0-based column index to letter (A=0, B=1, ..., N=13)
-    col_letter = chr(65 + waybill_col_idx)
+    """Highlights the ENTIRE row (from column A to N) in soft green when WAYBILL is checked."""
+    col_letter = chr(65 + waybill_col_idx)  # Column 13 -> 'N'
     formula = f"=${col_letter}2=TRUE"
 
     return {
@@ -216,12 +215,12 @@ def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_id
                         "values": [{"userEnteredValue": formula}]
                     },
                     "format": {
-                        "backgroundColor": {"red": 0.8, "green": 0.93, "blue": 0.8},  # Soft Green highlight
+                        "backgroundColor": {"red": 0.8, "green": 0.93, "blue": 0.8},
                         "textFormat": {"foregroundColor": {"red": 0.05, "green": 0.35, "blue": 0.05}}
                     }
                 }
             },
-            "index": 0  # Priority index 0 so it overrides consult cell colors when completed
+            "index": 0  # Priority index 0 so it highlights the whole row when checked
         }
     }
 
@@ -236,21 +235,18 @@ def _build_navigation_tab(spreadsheet, sources_info):
     except gspread.WorksheetNotFound:
         nav_ws = spreadsheet.add_worksheet(title=nav_title, rows=50, cols=10)
 
-    # Reorder Navigation sheet to be first (index 0)
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
 
     start_row = 5
     button_requests = []
 
-    # Format Title
     nav_ws.update(values=[["📌 CareLink Patient Checklist Navigation"], ["Click any button below to jump directly to that source sheet:"]], range_name="B2:B3")
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
 
-    # Create Big Button Rows
     for idx, (title, count, gid) in enumerate(sources_info):
-        row_num = start_row + (idx * 3)  # 3 rows spacing per button
-        cell_range = f"B{row_num}:E{row_num+1}"  # Merged 2x4 block for BIG button appearance
+        row_num = start_row + (idx * 3)
+        cell_range = f"B{row_num}:E{row_num+1}"
         
         formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
         
@@ -328,7 +324,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ws.format("1:1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
 
-        # Checkbox data validation (including WAYBILL)
+        # Checkbox validation for 1ST CONTACT, 2ND CONTACT, PRESCRIBED, PACKED, WAYBILL
         for col_idx in CHECKBOX_COL_INDICES:
             formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
@@ -353,7 +349,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     if formatting_requests:
         spreadsheet.batch_update({"requests": formatting_requests})
 
-    # Build Navigation Landing Page with Big Buttons
+    # Build Navigation Landing Page
     _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written
