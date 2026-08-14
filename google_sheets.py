@@ -133,6 +133,77 @@ def _dropdown_request(sheet_id, n_data_rows, col_index, options):
     }
 
 
+def _text_wrap_request(sheet_id, n_data_rows, n_cols):
+    """Enables WRAP strategy for all cells in the worksheet."""
+    return {
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 0,
+                "endRowIndex": 1 + n_data_rows,
+                "startColumnIndex": 0,
+                "endColumnIndex": n_cols,
+            },
+            "cell": {
+                "userEnteredFormat": {
+                    "wrapStrategy": "WRAP"
+                }
+            },
+            "fields": "userEnteredFormat.wrapStrategy",
+        }
+    }
+
+
+def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
+    """Adds conditional formatting rules to color the Consult status options."""
+    color_map = {
+        "Pending": {
+            "bg": {"red": 1.0, "green": 0.95, "blue": 0.8},      # Soft Yellow
+            "fg": {"red": 0.5, "green": 0.35, "blue": 0.0},
+        },
+        "Scheduled": {
+            "bg": {"red": 0.88, "green": 0.93, "blue": 1.0},     # Soft Blue
+            "fg": {"red": 0.1, "green": 0.3, "blue": 0.6},
+        },
+        "Completed": {
+            "bg": {"red": 0.85, "green": 0.94, "blue": 0.85},    # Soft Green
+            "fg": {"red": 0.1, "green": 0.4, "blue": 0.1},
+        },
+        "No Show": {
+            "bg": {"red": 0.98, "green": 0.85, "blue": 0.85},     # Soft Red
+            "fg": {"red": 0.6, "green": 0.1, "blue": 0.1},
+        },
+    }
+
+    requests = []
+    for option, colors in color_map.items():
+        requests.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1 + n_data_rows,
+                        "startColumnIndex": consult_col_idx,
+                        "endColumnIndex": consult_col_idx + 1,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "TEXT_EQ",
+                            "values": [{"userEnteredValue": option}]
+                        },
+                        "format": {
+                            "backgroundColor": colors["bg"],
+                            "textFormat": {"foregroundColor": colors["fg"], "bold": True}
+                        }
+                    }
+                },
+                "index": 0
+            }
+        })
+    return requests
+
+
 def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     client = _get_client()
 
@@ -154,7 +225,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ) from e
     
     written = []
-    validation_requests = []
+    formatting_requests = []
 
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
         rows = rows_by_source[source_label]
@@ -176,15 +247,26 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ws.format("1:1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
 
+        # Checkbox data validation
         for col_idx in CHECKBOX_COL_INDICES:
-            validation_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
-        validation_requests.append(
+            formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
+        
+        # Consult dropdown validation
+        formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
+        )
+
+        # Cell Text Wrapping
+        formatting_requests.append(_text_wrap_request(ws.id, n_data_rows, n_cols))
+
+        # Consult option colors (Pending, Scheduled, Completed, No Show)
+        formatting_requests.extend(
+            _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
         written.append((title, n_data_rows))
 
-    if validation_requests:
-        spreadsheet.batch_update({"requests": validation_requests})
+    if formatting_requests:
+        spreadsheet.batch_update({"requests": formatting_requests})
 
     return spreadsheet.url, written

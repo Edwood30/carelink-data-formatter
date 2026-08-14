@@ -74,8 +74,10 @@ def build_checklist_rows_by_source(df_med, df_patient):
     Returns (rows_by_source, seen_pins, med_cols, patient_meta, total_count)
     where rows_by_source is {source_label: [row_dict, ...]}, sorted
     alphabetically by Last Name (then First Name) within each source.
-    Patients with no detected source (including everyone still awaiting
-    follow-up) are grouped under "Unspecified Source".
+
+    Patients with no detected source or awaiting follow-up inherit the source 
+    associated with their record (or fall under "Unspecified Source") and are 
+    grouped together in the same worksheet tabs as patients who received medicine.
     """
     by_pin, order, med_cols = _build_rendered_rows(df_med)
 
@@ -106,6 +108,10 @@ def build_checklist_rows_by_source(df_med, df_patient):
     for pin, info in patient_lookup.items():
         if pin in seen_pins:
             continue
+        
+        # Check if patient source is available in the registered patients file info
+        source = info.get("Patient Source", "") or info.get("Source", "")
+        
         all_rows.append(
             {
                 "Last Name": info["Last Name"],
@@ -114,7 +120,7 @@ def build_checklist_rows_by_source(df_med, df_patient):
                 "Cellphone Number": info["Contact Number"],
                 "Full Address": info["Full Address"],
                 "Medicines rendered": "",
-                "Patient Source": "",
+                "Patient Source": clean_str(source),
                 "Notes": "",
             }
         )
@@ -123,6 +129,7 @@ def build_checklist_rows_by_source(df_med, df_patient):
 
     rows_by_source = {}
     for row in all_rows:
+        # Assign source label, defaulting to "Unspecified Source" if completely empty
         source_label = row["Patient Source"].strip() or "Unspecified Source"
         rows_by_source.setdefault(source_label, []).append(row)
 
