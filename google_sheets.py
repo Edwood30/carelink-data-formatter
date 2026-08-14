@@ -18,25 +18,27 @@ from google.oauth2.service_account import Credentials
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 CHECKLIST_HEADERS = [
-    "1st Contact",
-    "Consult",
-    "2nd Contact",
-    "Last Name",
-    "First Name",
-    "Middle Name",
-    "Cellphone Number",
-    "Full Address",
-    "Medicines rendered",
-    "Patient Source",
-    "Notes",
-    "Prescribed",
-    "Packed",
+    "PATIENT SOURCE",
+    "CONTACT NUMBER",
+    "LAST NAME",
+    "FIRST NAME",
+    "MIDDLE NAME",
+    "ADDRESS",
+    "1ST CONTACT",
+    "NOTES",
+    "CONSULT",
+    "MEDICINE RENDERED",
+    "PRESCRIBED",
+    "PACKED",
+    "2ND CONTACT",
+    "WAYBILL",
 ]
 
 # 0-based column indices, computed from CHECKLIST_HEADERS
-_CHECKBOX_HEADERS = ("1st Contact", "2nd Contact", "Prescribed", "Packed")
+_CHECKBOX_HEADERS = ("1ST CONTACT", "2ND CONTACT", "PRESCRIBED", "PACKED", "WAYBILL")
 CHECKBOX_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in _CHECKBOX_HEADERS]
-CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("Consult")
+CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("CONSULT")
+WAYBILL_COL_INDEX = CHECKLIST_HEADERS.index("WAYBILL")
 
 CONSULT_OPTIONS = ["Pending", "Scheduled", "Completed", "No Show"]
 
@@ -86,10 +88,23 @@ def _sanitize_sheet_title(s):
 
 
 def _row_to_values(row):
-    return [
-        "" if h in _CHECKBOX_HEADERS or h == "Consult" else row.get(h, "")
-        for h in CHECKLIST_HEADERS
-    ]
+    mapping = {
+        "PATIENT SOURCE": row.get("Patient Source", ""),
+        "CONTACT NUMBER": row.get("Cellphone Number", ""),
+        "LAST NAME": row.get("Last Name", ""),
+        "FIRST NAME": row.get("First Name", ""),
+        "MIDDLE NAME": row.get("Middle Name", ""),
+        "ADDRESS": row.get("Full Address", ""),
+        "1ST CONTACT": "",
+        "NOTES": row.get("Notes", ""),
+        "CONSULT": "",
+        "MEDICINE RENDERED": row.get("Medicines rendered", ""),
+        "PRESCRIBED": "",
+        "PACKED": "",
+        "2ND CONTACT": "",
+        "WAYBILL": False,  # Default unchecked
+    }
+    return [mapping.get(h, "") for h in CHECKLIST_HEADERS]
 
 
 def _checkbox_request(sheet_id, n_data_rows, col_index):
@@ -173,10 +188,42 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
                         }
                     }
                 },
-                "index": 0
+                "index": 1
             }
         })
     return requests
+
+
+def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_idx):
+    """Highlights the ENTIRE row in soft green when the Waybill checkbox is checked (TRUE)."""
+    # Convert 0-based column index to letter (A=0, B=1, ..., N=13)
+    col_letter = chr(65 + waybill_col_idx)
+    formula = f"=${col_letter}2=TRUE"
+
+    return {
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{
+                    "sheetId": sheet_id,
+                    "startRowIndex": 1,
+                    "endRowIndex": 1 + n_data_rows,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": n_cols,
+                }],
+                "booleanRule": {
+                    "condition": {
+                        "type": "CUSTOM_FORMULA",
+                        "values": [{"userEnteredValue": formula}]
+                    },
+                    "format": {
+                        "backgroundColor": {"red": 0.8, "green": 0.93, "blue": 0.8},  # Soft Green highlight
+                        "textFormat": {"foregroundColor": {"red": 0.05, "green": 0.35, "blue": 0.05}}
+                    }
+                }
+            },
+            "index": 0  # Priority index 0 so it overrides consult cell colors when completed
+        }
+    }
 
 
 def _build_navigation_tab(spreadsheet, sources_info):
@@ -192,9 +239,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
     # Reorder Navigation sheet to be first (index 0)
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
 
-    # Setup Title Banner
-    values = [["CareLink Patient Checklist Navigation"], ["Select a Patient Source below to jump to its sheet:"], []]
-    
     start_row = 5
     button_requests = []
 
@@ -206,14 +250,13 @@ def _build_navigation_tab(spreadsheet, sources_info):
     # Create Big Button Rows
     for idx, (title, count, gid) in enumerate(sources_info):
         row_num = start_row + (idx * 3)  # 3 rows spacing per button
-        cell_range = f"B{row_num}:E{row_num+1}" # Merged 2x4 block for BIG button appearance
+        cell_range = f"B{row_num}:E{row_num+1}"  # Merged 2x4 block for BIG button appearance
         
         formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
         
         nav_ws.update(values=[[formula]], range_name=f"B{row_num}")
         nav_ws.merge_cells(cell_range)
         
-        # Style as a big button
         button_requests.append({
             "repeatCell": {
                 "range": {
@@ -225,11 +268,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
                 },
                 "cell": {
                     "userEnteredFormat": {
-                        "backgroundColor": {"red": 0.15, "green": 0.45, "blue": 0.85}, # Soft Blue Button
+                        "backgroundColor": {"red": 0.15, "green": 0.45, "blue": 0.85},
                         "horizontalAlignment": "CENTER",
                         "verticalAlignment": "MIDDLE",
                         "textFormat": {
-                            "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, # White text
+                            "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
                             "bold": True,
                             "fontSize": 13,
                         }
@@ -262,7 +305,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ) from e
     
     written = []
-    sources_info = [] # Stores (title, count, sheet_id)
+    sources_info = []
     formatting_requests = []
 
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
@@ -285,13 +328,18 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ws.format("1:1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
 
-        # Checkbox data validation
+        # Checkbox data validation (including WAYBILL)
         for col_idx in CHECKBOX_COL_INDICES:
             formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
         # Consult dropdown validation
         formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
+        )
+
+        # Highlight entire row green when WAYBILL is checked
+        formatting_requests.append(
+            _waybill_row_highlight_request(ws.id, n_data_rows, n_cols, WAYBILL_COL_INDEX)
         )
 
         # Consult option colors (Pending, Scheduled, Completed, No Show)

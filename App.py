@@ -85,21 +85,17 @@ inject_uploader_tweaks()
 _header_icon_html = (
     f'<img src="{LOGO_DATA_URI}" alt="FTCC" class="app-header-logo" style="width:22px;height:22px;max-width:22px;max-height:22px;object-fit:contain;border-radius:4px;display:block;" />'
     if LOGO_DATA_URI
-    else """<svg width="20" height="20" viewBox="0 0 24 24" fill="#2F5FE8">
-        <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/>
-    </svg>"""
+    else '<svg width="20" height="20" viewBox="0 0 24 24" fill="#2F5FE8"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>'
 )
 
 st.markdown(
-    f"""
-<div class="app-header-row" style="display:flex;align-items:center;justify-content:flex-start;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;">
-    <div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;overflow:hidden;border-radius:8px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>
-    <div>
-        <div class="app-header-title">CareLink Data Formatting</div>
-        <div class="app-header-subtitle">Format and organize data for CareLink Express and Coordinator systems.</div>
-    </div>
-</div>
-""",
+    f'<div class="app-header-row" style="display:flex;align-items:center;justify-content:flex-start;gap:12px;padding-bottom:16px;margin-bottom:24px;border-bottom:1px solid #E2E8F0;width:100%;">'
+    f'<div class="app-header-icon-wrap" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;overflow:hidden;border-radius:8px;background-color:#FFFFFF;border:1px solid #E2E8F0;">{_header_icon_html}</div>'
+    f'<div style="flex:0 1 auto;margin:0;padding:0;text-align:left;">'
+    f'<div class="app-header-title" style="margin:0;padding:0;text-align:left;">CareLink Data Formatting</div>'
+    f'<div class="app-header-subtitle" style="margin:0;padding:0;text-align:left;">Format and organize data for CareLink Express and Coordinator systems.</div>'
+    f'</div>'
+    f'</div>',
     unsafe_allow_html=True,
 )
 
