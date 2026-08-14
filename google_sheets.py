@@ -1,0 +1,183 @@
+"""
+Google Sheets integration for the Patient Follow-Up Checklist.
+
+Instead of generating a downloadable .xlsx, this writes each Patient
+Source into its own worksheet (tab) inside one fixed Google Spreadsheet
+— same URL every time, one tab per source, updated in place on every run.
+
+Requires a Google Cloud service account configured in Streamlit secrets.
+See README.md for the full setup walkthrough. This module does nothing
+(and is_configured() returns False) until that's done.
+"""
+import re
+
+import gspread
+import streamlit as st
+from google.oauth2.service_account import Credentials
+
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+CHECKLIST_HEADERS = [
+    "1st Contact",
+    "Consult",
+    "2nd Contact",
+    "Last Name",
+    "First Name",
+    "Middle Name",
+    "Cellphone Number",
+    "Full Address",
+    "Medicines rendered",
+    "Patient Source",
+    "Notes",
+    "Prescribed",
+    "Packed",
+]
+
+# 0-based column indices, computed from CHECKLIST_HEADERS so they can
+# never silently drift out of sync if the header list is edited later.
+_CHECKBOX_HEADERS = ("1st Contact", "2nd Contact", "Prescribed", "Packed")
+CHECKBOX_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in _CHECKBOX_HEADERS]
+CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("Consult")
+
+# Assumption (no explicit values given): a reasonable default follow-up
+# vocabulary. Change freely.
+CONSULT_OPTIONS = ["Pending", "Scheduled", "Completed", "No Show"]
+
+
+def is_configured():
+    try:
+        return "gcp_service_account" in st.secrets
+    except Exception:
+        return False
+
+
+def service_account_email():
+    try:
+        return st.secrets["gcp_service_account"]["client_email"]
+    except Exception:
+        return None
+
+
+def default_spreadsheet_url():
+    try:
+        return st.secrets.get("default_spreadsheet_url", "")
+    except Exception:
+        return ""
+
+
+def extract_spreadsheet_id(url_or_id):
+    """Accepts either a full Google Sheets URL or a bare spreadsheet ID."""
+    url_or_id = (url_or_id or "").strip()
+    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url_or_id)
+    return m.group(1) if m else url_or_id
+
+
+@st.cache_resource(show_spinner=False)
+def _get_client():
+    creds_dict = dict(st.secrets["gcp_service_account"])
+    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+    return gspread.authorize(creds)
+
+
+def _sanitize_sheet_title(s):
+    """Google Sheets tab names can't contain : \\ / ? * [ ] and are capped
+    at 100 characters."""
+    s = str(s or "").strip()
+    for ch in ("\\", "/", "?", "*", "[", "]", ":"):
+        s = s.replace(ch, "")
+    s = re.sub(r"\s+", " ", s).strip()
+    return (s[:100] or "Unspecified Source")
+
+
+def _row_to_values(row):
+    return [
+        "" if h in _CHECKBOX_HEADERS or h == "Consult" else row.get(h, "")
+        for h in CHECKLIST_HEADERS
+    ]
+
+
+def _checkbox_request(sheet_id, n_data_rows, col_index):
+    return {
+        "setDataValidation": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "endRowIndex": 1 + n_data_rows,
+                "startColumnIndex": col_index,
+                "endColumnIndex": col_index + 1,
+            },
+            "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+        }
+    }
+
+
+def _dropdown_request(sheet_id, n_data_rows, col_index, options):
+    return {
+        "setDataValidation": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "endRowIndex": 1 + n_data_rows,
+                "startColumnIndex": col_index,
+                "endColumnIndex": col_index + 1,
+            },
+            "rule": {
+                "condition": {
+                    "type": "ONE_OF_LIST",
+                    "values": [{"userEnteredValue": o} for o in options],
+                },
+                "showCustomUi": True,
+                "strict": True,
+            },
+        }
+    }
+
+
+def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
+    """
+    rows_by_source: dict of {source_label: [row_dict, ...]}, where each
+    row_dict has keys from CHECKLIST_HEADERS minus the checkbox/Consult
+    columns (those are always written blank for staff to fill in).
+
+    Returns (spreadsheet_url, [(tab_title, row_count), ...]) on success.
+    Raises on failure — callers should catch and show a friendly message.
+    """
+    client = _get_client()
+    sheet_id = extract_spreadsheet_id(spreadsheet_url_or_id)
+    spreadsheet = client.open_by_key(sheet_id)
+
+    written = []
+    validation_requests = []
+
+    for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
+        rows = rows_by_source[source_label]
+        title = _sanitize_sheet_title(source_label)
+        n_data_rows = len(rows)
+        n_cols = len(CHECKLIST_HEADERS)
+
+        try:
+            ws = spreadsheet.worksheet(title)
+            ws.clear()
+            ws.resize(rows=max(n_data_rows + 1, 2), cols=n_cols)
+        except gspread.WorksheetNotFound:
+            ws = spreadsheet.add_worksheet(
+                title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
+            )
+
+        values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
+        ws.update(values=values, range_name="A1")
+        ws.format("1:1", {"textFormat": {"bold": True}})
+        ws.freeze(rows=1)
+
+        for col_idx in CHECKBOX_COL_INDICES:
+            validation_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
+        validation_requests.append(
+            _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
+        )
+
+        written.append((title, n_data_rows))
+
+    if validation_requests:
+        spreadsheet.batch_update({"requests": validation_requests})
+
+    return spreadsheet.url, written

@@ -2,255 +2,131 @@
 FEATURE 3: Patient Follow-Up Checklist.
 
 Upload the same two files as the Coordinator merge (Rendered Medicines +
-Registered Patients), get back a single hand-markable checklist covering
-EVERY patient — both those who already received medicine and those still
-awaiting follow-up — with columns:
-
-    1st Contact, Consult, 2nd Contact, Full Name, Cellphone Number,
-    Full Address, Medicines rendered, Patient Source, Notes,
-    Prescribed, Packed
+Registered Patients). Instead of a downloadable file, this pushes the
+result straight into a Google Sheet — one worksheet tab per Patient
+Source, all inside a single fixed spreadsheet, updated in place on every
+run. Requires Google Sheets access to be configured (see README.md).
 
 Column detection is reused from feature_formatter (for the Rendered
 Medicines file) and feature_merger (for the Registered Patients lookup)
 rather than re-implemented, so fuzzy-matching behavior stays identical
 across every feature in the app.
 """
-import io
-
-import openpyxl
-import pandas as pd
 import streamlit as st
-from openpyxl.styles import Alignment, Border, Font, Side
-from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.datavalidation import DataValidation
 
+import google_sheets
 from feature_formatter import _detect_columns, _get
 from feature_merger import _build_patient_lookup
-from utils import (
-    clean_filename,
-    clean_pin,
-    clean_str,
-    format_contact_number,
-    read_data_file,
-    split_name_fallback,
-)
-
-HEADERS = [
-    "1st Contact",
-    "Consult",
-    "2nd Contact",
-    "Full Name",
-    "Cellphone Number",
-    "Full Address",
-    "Medicines rendered",
-    "Patient Source",
-    "Notes",
-    "Prescribed",
-    "Packed",
-]
-
-# Assumption: no explicit dropdown values were given, so these are a
-# reasonable default follow-up-call vocabulary. Easy to change — see
-# CONSULT_OPTIONS below.
-CONSULT_OPTIONS = ["Pending", "Scheduled", "Completed", "No Show"]
-
-CHECKBOX_COLS = {"1st Contact", "2nd Contact", "Prescribed", "Packed"}
-
-COLUMN_WIDTHS = {
-    "1st Contact": 11,
-    "Consult": 14,
-    "2nd Contact": 11,
-    "Full Name": 26,
-    "Cellphone Number": 15,
-    "Full Address": 30,
-    "Medicines rendered": 32,
-    "Patient Source": 20,
-    "Notes": 24,
-    "Prescribed": 11,
-    "Packed": 10,
-}
+from utils import clean_pin, clean_str, format_contact_number, read_data_file, split_name_fallback
 
 
-def _full_name(last, first, middle):
-    return " ".join(p for p in [first, middle, last] if p)
+def _last_first_middle(cols, row):
+    last_val = clean_str(_get(row, cols["last"])) if cols["last"] else ""
+    first_val = clean_str(_get(row, cols["first"])) if cols["first"] else ""
+    middle_val = clean_str(_get(row, cols["middle"])) if cols["middle"] else ""
+    raw_name = clean_str(_get(row, cols["patient_name"])) if cols["patient_name"] else ""
+
+    if last_val and first_val:
+        return last_val, first_val, middle_val
+    if raw_name:
+        return split_name_fallback(raw_name)
+    return last_val, first_val, middle_val
 
 
 def _build_rendered_rows(df_med):
     """One row per PATIENT (not per medicine) — medicines they received
-    are aggregated into a single comma-separated cell."""
+    are aggregated into a single comma-separated cell. Grouped by the
+    detected Patient Source for each patient."""
     cols = _detect_columns(df_med)
     by_pin = {}
     order = []
 
     for _, row in df_med.iterrows():
         pin = clean_pin(_get(row, cols["pin"])) if cols["pin"] else ""
+        last, first, middle = _last_first_middle(cols, row)
+        key = pin or f"NO_PIN::{last.lower()}::{first.lower()}"
 
-        last_val = clean_str(_get(row, cols["last"])) if cols["last"] else ""
-        first_val = clean_str(_get(row, cols["first"])) if cols["first"] else ""
-        middle_val = clean_str(_get(row, cols["middle"])) if cols["middle"] else ""
-        raw_name = clean_str(_get(row, cols["patient_name"])) if cols["patient_name"] else ""
-
-        if last_val and first_val:
-            full_name = raw_name or _full_name(last_val, first_val, middle_val)
-        elif raw_name:
-            full_name = raw_name
-        else:
-            l, f, m = split_name_fallback(raw_name)
-            full_name = _full_name(l, f, m)
-
-        key = pin or f"NO_PIN::{full_name.lower()}"
         if key not in by_pin:
             by_pin[key] = {
-                "full_name": full_name,
-                "phone": format_contact_number(_get(row, cols["phone"])) if cols["phone"] else "",
-                "address": clean_str(_get(row, cols["address"])) if cols["address"] else "",
-                "source": clean_str(_get(row, cols["source"])) if cols["source"] else "",
-                "medicines": [],
+                "Last Name": last,
+                "First Name": first,
+                "Middle Name": middle,
+                "Cellphone Number": format_contact_number(_get(row, cols["phone"])) if cols["phone"] else "",
+                "Full Address": clean_str(_get(row, cols["address"])) if cols["address"] else "",
+                "Patient Source": clean_str(_get(row, cols["source"])) if cols["source"] else "",
+                "Notes": clean_str(_get(row, cols["notes"])) if cols["notes"] else "",
+                "_medicines": [],
+                "_pin": pin,
             }
             order.append(key)
 
         medicine = clean_str(_get(row, cols["medicine"])) if cols["medicine"] else ""
-        if medicine and medicine not in by_pin[key]["medicines"]:
-            by_pin[key]["medicines"].append(medicine)
-        if not by_pin[key]["source"] and cols["source"]:
-            by_pin[key]["source"] = clean_str(_get(row, cols["source"]))
+        if medicine and medicine not in by_pin[key]["_medicines"]:
+            by_pin[key]["_medicines"].append(medicine)
+        if not by_pin[key]["Patient Source"] and cols["source"]:
+            by_pin[key]["Patient Source"] = clean_str(_get(row, cols["source"]))
 
-    return {
-        pin: {
-            "Full Name": info["full_name"],
-            "Cellphone Number": info["phone"],
-            "Full Address": info["address"],
-            "Medicines rendered": ", ".join(info["medicines"]),
-            "Patient Source": info["source"],
-        }
-        for pin, info in ((k, by_pin[k]) for k in order)
-    }, cols
+    return by_pin, order, cols
 
 
-def build_checklist(df_med, df_patient):
-    rendered_by_pin, med_cols = _build_rendered_rows(df_med)
+def build_checklist_rows_by_source(df_med, df_patient):
+    """
+    Returns (rows_by_source, seen_pins, med_cols, patient_meta, total_count)
+    where rows_by_source is {source_label: [row_dict, ...]}, sorted
+    alphabetically by Last Name (then First Name) within each source.
+    Patients with no detected source (including everyone still awaiting
+    follow-up) are grouped under "Unspecified Source".
+    """
+    by_pin, order, med_cols = _build_rendered_rows(df_med)
 
     patient_lookup, patient_meta = _build_patient_lookup(df_patient)
     if patient_lookup is None:
-        st.error(
-            "Could not find a 'Patient PIN' column in the Registered "
-            f"Patients file. Found columns: {list(df_patient.columns)}"
-        )
-        return None, None
+        return None, None, med_cols, None, 0
 
-    rows = []
+    all_rows = []
     seen_pins = set()
 
-    for pin, info in rendered_by_pin.items():
-        rows.append(dict(info))
-        if not pin.startswith("NO_PIN::"):
-            seen_pins.add(pin)
+    for key in order:
+        info = by_pin[key]
+        if info["_pin"]:
+            seen_pins.add(info["_pin"])
+        all_rows.append(
+            {
+                "Last Name": info["Last Name"],
+                "First Name": info["First Name"],
+                "Middle Name": info["Middle Name"],
+                "Cellphone Number": info["Cellphone Number"],
+                "Full Address": info["Full Address"],
+                "Medicines rendered": ", ".join(info["_medicines"]),
+                "Patient Source": info["Patient Source"],
+                "Notes": info["Notes"],
+            }
+        )
 
     for pin, info in patient_lookup.items():
         if pin in seen_pins:
             continue
-        rows.append(
+        all_rows.append(
             {
-                "Full Name": _full_name(info["Last Name"], info["First Name"], info["Middle Name"]),
+                "Last Name": info["Last Name"],
+                "First Name": info["First Name"],
+                "Middle Name": info["Middle Name"],
                 "Cellphone Number": info["Contact Number"],
                 "Full Address": info["Full Address"],
                 "Medicines rendered": "",
                 "Patient Source": "",
+                "Notes": "",
             }
         )
 
-    rows.sort(key=lambda r: r["Full Name"].strip().lower())
+    all_rows.sort(key=lambda r: (r["Last Name"].strip().lower(), r["First Name"].strip().lower()))
 
-    with st.expander("Detected column mapping (click to verify)"):
-        st.markdown(
-            f"""
-**Rendered Medicines file**
-- Patient PIN → {f"`{med_cols['pin']}`" if med_cols['pin'] else "not found — left blank"}
-- Name → {f"`{med_cols['last']}` + `{med_cols['first']}`" if med_cols['last'] and med_cols['first'] else (f"split from `{med_cols['patient_name']}`" if med_cols['patient_name'] else "not found — left blank")}
-- Contact Number → {f"`{med_cols['phone']}`" if med_cols['phone'] else "not found — left blank"}
-- Full Address → {f"`{med_cols['address']}`" if med_cols['address'] else "not found — left blank"}
-- Medicine → {f"`{med_cols['medicine']}`" if med_cols['medicine'] else "not found — left blank"}
-- Patient Source → {f"`{med_cols['source']}`" if med_cols['source'] else "not found — left blank"}
+    rows_by_source = {}
+    for row in all_rows:
+        source_label = row["Patient Source"].strip() or "Unspecified Source"
+        rows_by_source.setdefault(source_label, []).append(row)
 
-**Registered Patients file**
-- Patient PIN → `{patient_meta['pin_col']}`
-- Name → {patient_meta['name_source']}
-- Contact Number → {f"`{patient_meta['phone_col']}`" if patient_meta['phone_col'] else "not found — left blank"}
-- Full Address → {f"`{patient_meta['address_col']}`" if patient_meta['address_col'] else "not found — left blank"}
-
-**Result:** {len(rows)} total patients — {len(seen_pins)} already rendered, {len(rows) - len(seen_pins)} awaiting follow-up.
-            """
-        )
-
-    return _build_workbook(rows), len(rows)
-
-
-def _build_workbook(rows):
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Patient Checklist"
-    ws.views.sheetView[0].showGridLines = True
-
-    header_font = Font(name="Calibri", size=11, bold=True)
-    header_border = Border(
-        left=Side(style="thin"), right=Side(style="thin"),
-        top=Side(style="thin"), bottom=Side(style="medium"),
-    )
-    data_font = Font(name="Calibri", size=10)
-    thin_border = Border(
-        left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
-        top=Side(style="thin", color="000000"), bottom=Side(style="thin", color="000000"),
-    )
-    align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-    ws.row_dimensions[1].height = 24
-    for col_idx, h in enumerate(HEADERS, start=1):
-        cell = ws.cell(row=1, column=col_idx, value=h)
-        cell.font = header_font
-        cell.alignment = align_center
-        cell.border = header_border
-
-    for row_idx, row in enumerate(rows, start=2):
-        ws.row_dimensions[row_idx].height = 20
-        for col_idx, header in enumerate(HEADERS, start=1):
-            cell = ws.cell(row=row_idx, column=col_idx)
-            cell.font = data_font
-            cell.border = thin_border
-            if header in CHECKBOX_COLS:
-                cell.value = ""
-                cell.alignment = align_center
-            elif header == "Consult":
-                cell.value = ""
-                cell.alignment = align_center
-            elif header == "Cellphone Number":
-                cell.value = row.get(header, "")
-                cell.number_format = "@"
-                cell.alignment = align_center
-            else:
-                cell.value = row.get(header, "")
-                cell.alignment = align_left
-
-    if rows:
-        last_row = len(rows) + 1
-        dv = DataValidation(
-            type="list",
-            formula1='"{}"'.format(",".join(CONSULT_OPTIONS)),
-            allow_blank=True,
-            showDropDown=False,
-        )
-        ws.add_data_validation(dv)
-        dv.add(f"B2:B{last_row}")
-
-    for col_idx, header in enumerate(HEADERS, start=1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = COLUMN_WIDTHS.get(header, 16)
-
-    ws.freeze_panes = "A2"
-
-    out = io.BytesIO()
-    wb.save(out)
-    out.seek(0)
-    return out
+    return rows_by_source, seen_pins, med_cols, patient_meta, len(all_rows)
 
 
 def render_checklist_tab():
@@ -258,10 +134,20 @@ def render_checklist_tab():
     st.markdown(
         """
     <div class="section-heading">Patient Follow-Up Checklist</div>
-    <div class="section-subtext">Upload Rendered Medicines and Registered Patients files to generate one hand-markable checklist covering every patient — both already served and still awaiting follow-up.</div>
+    <div class="section-subtext">Upload Rendered Medicines and Registered Patients files. Pushes one checklist tab per Patient Source straight into your Google Sheet — covering every patient, already served or still awaiting follow-up.</div>
     """,
         unsafe_allow_html=True,
     )
+
+    if not google_sheets.is_configured():
+        st.markdown(
+            '<div class="card-title" style="color:#94A3B8;">'
+            "Google Sheets isn't connected yet. See README.md for the "
+            "setup steps (Google Cloud service account + Streamlit secrets) "
+            "— this tab won't work until that's done.</div>",
+            unsafe_allow_html=True,
+        )
+        return
 
     col1, col2 = st.columns(2)
 
@@ -306,72 +192,119 @@ def render_checklist_tab():
     if st.session_state.get("t3_file_signature") != file_signature:
         st.session_state["t3_file_signature"] = file_signature
         st.session_state["t3_processed"] = False
-        st.session_state["t3_buffer"] = None
+        st.session_state["t3_result"] = None
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown(
-        '<div class="card-title" style="margin-left: 2px;">Output File Name:</div>',
+        '<div class="card-title" style="margin-left: 2px;">Google Sheet:</div>',
         unsafe_allow_html=True,
     )
 
-    c_name, c_action = st.columns([3.2, 1.2])
-    default_out = "CareLinkChecklist-Data-Source.xlsx"
-
-    with c_name:
-        output_file_name_input = st.text_input(
-            "Output File Name",
-            value=default_out,
-            key="filename_tab3",
+    c_url, c_action = st.columns([3.2, 1.2])
+    with c_url:
+        sheet_url_input = st.text_input(
+            "Google Sheet URL",
+            value=google_sheets.default_spreadsheet_url(),
+            key="t3_sheet_url",
             label_visibility="collapsed",
+            placeholder="Paste the Google Sheet URL…",
         )
 
     with c_action:
         both_uploaded = (file_med is not None) and (file_patient is not None)
-        btn_click = st.button("Generate", key="btn_gen_tab3", disabled=not both_uploaded)
+        has_url = bool((sheet_url_input or "").strip())
+        btn_click = st.button(
+            "Push to Google Sheets", key="btn_gen_tab3", disabled=not (both_uploaded and has_url)
+        )
 
-    if not both_uploaded:
+    if not both_uploaded or not has_url:
         missing = []
         if file_med is None:
             missing.append("Rendered Medicines")
         if file_patient is None:
             missing.append("Registered Patients")
+        if not has_url:
+            missing.append("a Google Sheet URL")
         st.markdown(
             f'<div class="card-title" style="color:#94A3B8;margin-top:-4px;">'
-            f'Please upload {" and ".join(missing)} before generating the checklist.</div>',
+            f'Please provide {" and ".join(missing)} before generating.</div>',
             unsafe_allow_html=True,
         )
 
-    if both_uploaded and btn_click:
+    if both_uploaded and has_url and btn_click:
         st.session_state["t3_processed"] = True
         try:
-            with st.spinner("Combining both files into one checklist..."):
+            with st.spinner("Combining both files and writing to Google Sheets..."):
                 df_med = read_data_file(file_med)
                 df_patient = read_data_file(file_patient)
-                buffer, _count = build_checklist(df_med, df_patient)
-                st.session_state["t3_buffer"] = buffer
-        except Exception:
-            st.session_state["t3_buffer"] = None
-            st.error(
-                "Something went wrong while processing the file. Please "
-                "check the file and try again."
-            )
+                rows_by_source, seen_pins, med_cols, patient_meta, total = build_checklist_rows_by_source(
+                    df_med, df_patient
+                )
 
-    if st.session_state.get("t3_processed") and st.session_state.get("t3_buffer"):
-        out_name = clean_filename(output_file_name_input, default_out)
+                if rows_by_source is None:
+                    st.error(
+                        "Could not find a 'Patient PIN' column in the "
+                        f"Registered Patients file. Found columns: {list(df_patient.columns)}"
+                    )
+                    st.session_state["t3_result"] = None
+                else:
+                    sheet_url, written = google_sheets.push_checklist_by_source(
+                        sheet_url_input, rows_by_source
+                    )
+                    st.session_state["t3_result"] = {
+                        "sheet_url": sheet_url,
+                        "written": written,
+                        "total": total,
+                        "med_cols": med_cols,
+                        "patient_meta": patient_meta,
+                    }
+        except Exception as e:
+            st.session_state["t3_result"] = None
+            hint = ""
+            email = google_sheets.service_account_email()
+            if email:
+                hint = (
+                    f" If this is a permissions error, make sure the sheet is "
+                    f"shared with `{email}` as an Editor."
+                )
+            st.error(
+                "Something went wrong while writing to Google Sheets. "
+                "Please check the sheet URL and try again." + hint
+            )
+            with st.expander("Technical details"):
+                st.code(str(e))
+
+    result = st.session_state.get("t3_result")
+    if st.session_state.get("t3_processed") and result:
+        tabs_summary = ", ".join(f"{title} ({n} rows)" for title, n in result["written"])
         st.markdown(
             f"""
         <div class="success-banner">
-            <strong>{out_name}</strong> generated — one row per patient, ready to print or work from.
+            Updated {len(result['written'])} tab{'s' if len(result['written']) != 1 else ''} across {result['total']} patients: {tabs_summary}.
         </div>
         """,
             unsafe_allow_html=True,
         )
+        st.markdown(f"[Open the spreadsheet]({result['sheet_url']})")
 
-        st.download_button(
-            label="Download Checklist (.xlsx)",
-            data=st.session_state["t3_buffer"],
-            file_name=out_name,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_tab3",
-        )
+        with st.expander("Detected column mapping (click to verify)"):
+            med_cols = result["med_cols"]
+            patient_meta = result["patient_meta"]
+            st.markdown(
+                f"""
+**Rendered Medicines file**
+- Patient PIN → {f"`{med_cols['pin']}`" if med_cols['pin'] else "not found — left blank"}
+- Name → {f"`{med_cols['last']}` + `{med_cols['first']}`" if med_cols['last'] and med_cols['first'] else (f"split from `{med_cols['patient_name']}`" if med_cols['patient_name'] else "not found — left blank")}
+- Contact Number → {f"`{med_cols['phone']}`" if med_cols['phone'] else "not found — left blank"}
+- Full Address → {f"`{med_cols['address']}`" if med_cols['address'] else "not found — left blank"}
+- Medicine → {f"`{med_cols['medicine']}`" if med_cols['medicine'] else "not found — left blank"}
+- Patient Source → {f"`{med_cols['source']}`" if med_cols['source'] else "not found — left blank"}
+
+**Registered Patients file**
+- Patient PIN → `{patient_meta['pin_col']}`
+- Name → {patient_meta['name_source']}
+- Contact Number → {f"`{patient_meta['phone_col']}`" if patient_meta['phone_col'] else "not found — left blank"}
+- Full Address → {f"`{patient_meta['address_col']}`" if patient_meta['address_col'] else "not found — left blank"}
+                """
+            )
