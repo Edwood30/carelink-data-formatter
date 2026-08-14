@@ -133,27 +133,6 @@ def _dropdown_request(sheet_id, n_data_rows, col_index, options):
     }
 
 
-def _text_wrap_request(sheet_id, n_data_rows, n_cols):
-    """Enables WRAP strategy for all cells in the worksheet."""
-    return {
-        "repeatCell": {
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": 0,
-                "endRowIndex": 1 + n_data_rows,
-                "startColumnIndex": 0,
-                "endColumnIndex": n_cols,
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "wrapStrategy": "WRAP"
-                }
-            },
-            "fields": "userEnteredFormat.wrapStrategy",
-        }
-    }
-
-
 def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
     """Adds conditional formatting rules to color the Consult status options."""
     color_map = {
@@ -255,9 +234,6 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
         )
-
-        # Cell Text Wrapping
-        formatting_requests.append(_text_wrap_request(ws.id, n_data_rows, n_cols))
 
         # Consult option colors (Pending, Scheduled, Completed, No Show)
         formatting_requests.extend(

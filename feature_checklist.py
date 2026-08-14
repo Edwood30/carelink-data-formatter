@@ -74,10 +74,6 @@ def build_checklist_rows_by_source(df_med, df_patient):
     Returns (rows_by_source, seen_pins, med_cols, patient_meta, total_count)
     where rows_by_source is {source_label: [row_dict, ...]}, sorted
     alphabetically by Last Name (then First Name) within each source.
-
-    Patients with no detected source or awaiting follow-up inherit the source 
-    associated with their record (or fall under "Unspecified Source") and are 
-    grouped together in the same worksheet tabs as patients who received medicine.
     """
     by_pin, order, med_cols = _build_rendered_rows(df_med)
 
@@ -85,13 +81,30 @@ def build_checklist_rows_by_source(df_med, df_patient):
     if patient_lookup is None:
         return None, None, med_cols, None, 0
 
+    # Build a source lookup directly from the Registered Patients file
+    pat_cols = _detect_columns(df_patient)
+    patient_source_map = {}
+
+    if pat_cols["pin"] and pat_cols["source"]:
+        for _, row in df_patient.iterrows():
+            p_pin = clean_pin(_get(row, pat_cols["pin"]))
+            p_src = clean_str(_get(row, pat_cols["source"]))
+            if p_pin and p_src:
+                patient_source_map[p_pin] = p_src
+
     all_rows = []
     seen_pins = set()
 
+    # Process patients from the Rendered Medicines file
     for key in order:
         info = by_pin[key]
-        if info["_pin"]:
-            seen_pins.add(info["_pin"])
+        pin = info["_pin"]
+        if pin:
+            seen_pins.add(pin)
+
+        # Prefer source from rendered medicines, fallback to registered patients file
+        source = info["Patient Source"] or patient_source_map.get(pin, "")
+
         all_rows.append(
             {
                 "Last Name": info["Last Name"],
@@ -100,18 +113,19 @@ def build_checklist_rows_by_source(df_med, df_patient):
                 "Cellphone Number": info["Cellphone Number"],
                 "Full Address": info["Full Address"],
                 "Medicines rendered": ", ".join(info["_medicines"]),
-                "Patient Source": info["Patient Source"],
+                "Patient Source": source,
                 "Notes": info["Notes"],
             }
         )
 
+    # Process remaining registered patients awaiting follow-up (no medicines rendered)
     for pin, info in patient_lookup.items():
         if pin in seen_pins:
             continue
-        
-        # Check if patient source is available in the registered patients file info
-        source = info.get("Patient Source", "") or info.get("Source", "")
-        
+
+        # Map source from registered patients file
+        source = patient_source_map.get(pin, "")
+
         all_rows.append(
             {
                 "Last Name": info["Last Name"],
@@ -120,7 +134,7 @@ def build_checklist_rows_by_source(df_med, df_patient):
                 "Cellphone Number": info["Contact Number"],
                 "Full Address": info["Full Address"],
                 "Medicines rendered": "",
-                "Patient Source": clean_str(source),
+                "Patient Source": source,
                 "Notes": "",
             }
         )
@@ -129,7 +143,6 @@ def build_checklist_rows_by_source(df_med, df_patient):
 
     rows_by_source = {}
     for row in all_rows:
-        # Assign source label, defaulting to "Unspecified Source" if completely empty
         source_label = row["Patient Source"].strip() or "Unspecified Source"
         rows_by_source.setdefault(source_label, []).append(row)
 
