@@ -234,24 +234,32 @@ def render_checklist_tab():
 
     if both_uploaded and has_url and btn_click:
         st.session_state["t3_processed"] = True
+
         try:
             with st.spinner("Combining both files and writing to Google Sheets..."):
                 df_med = read_data_file(file_med)
                 df_patient = read_data_file(file_patient)
-                rows_by_source, seen_pins, med_cols, patient_meta, total = build_checklist_rows_by_source(
-                    df_med, df_patient
+
+                rows_by_source, seen_pins, med_cols, patient_meta, total = (
+                    build_checklist_rows_by_source(
+                        df_med, df_patient
+                    )
                 )
 
                 if rows_by_source is None:
                     st.error(
                         "Could not find a 'Patient PIN' column in the "
-                        f"Registered Patients file. Found columns: {list(df_patient.columns)}"
+                        f"Registered Patients file. Found columns: "
+                        f"{list(df_patient.columns)}"
                     )
                     st.session_state["t3_result"] = None
+
                 else:
                     sheet_url, written = google_sheets.push_checklist_by_source(
-                        sheet_url_input, rows_by_source
+                        sheet_url_input,
+                        rows_by_source
                     )
+
                     st.session_state["t3_result"] = {
                         "sheet_url": sheet_url,
                         "written": written,
@@ -259,21 +267,28 @@ def render_checklist_tab():
                         "med_cols": med_cols,
                         "patient_meta": patient_meta,
                     }
+
         except Exception as e:
+            import traceback
+
             st.session_state["t3_result"] = None
-            hint = ""
+
             email = google_sheets.service_account_email()
-            if email:
-                hint = (
-                    f" If this is a permissions error, make sure the sheet is "
-                    f"shared with `{email}` as an Editor."
-                )
+
             st.error(
-                "Something went wrong while writing to Google Sheets. "
-                "Please check the sheet URL and try again." + hint
+                "Something went wrong while writing to Google Sheets."
             )
-            with st.expander("Technical details"):
-                st.code(str(e))
+
+            st.markdown("### Technical details")
+
+            st.code(
+                f"Exception type: {type(e).__name__}\n"
+                f"Exception repr: {repr(e)}\n"
+                f"Exception string: {str(e) or '[EMPTY]'}\n\n"
+                f"Service account: {email or '[UNKNOWN]'}\n\n"
+                f"Traceback:\n{traceback.format_exc()}",
+                language="text",
+            )
 
     result = st.session_state.get("t3_result")
     if st.session_state.get("t3_processed") and result:

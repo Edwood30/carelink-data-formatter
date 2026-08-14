@@ -134,18 +134,25 @@ def _dropdown_request(sheet_id, n_data_rows, col_index, options):
 
 
 def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
-    """
-    rows_by_source: dict of {source_label: [row_dict, ...]}, where each
-    row_dict has keys from CHECKLIST_HEADERS minus the checkbox/Consult
-    columns (those are always written blank for staff to fill in).
-
-    Returns (spreadsheet_url, [(tab_title, row_count), ...]) on success.
-    Raises on failure — callers should catch and show a friendly message.
-    """
     client = _get_client()
-    sheet_id = extract_spreadsheet_id(spreadsheet_url_or_id)
-    spreadsheet = client.open_by_key(sheet_id)
 
+    sheet_id = extract_spreadsheet_id(spreadsheet_url_or_id)
+
+    if not sheet_id:
+        raise RuntimeError(
+            "No Google Spreadsheet ID was found."
+        )
+
+    try:
+        spreadsheet = client.open_by_key(sheet_id)
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not open spreadsheet.\n"
+            f"Spreadsheet ID: {sheet_id}\n"
+            f"Exception: {type(e).__name__}\n"
+            f"Details: {repr(e)}"
+        ) from e
+    
     written = []
     validation_requests = []
 
