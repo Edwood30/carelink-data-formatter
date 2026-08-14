@@ -33,14 +33,11 @@ CHECKLIST_HEADERS = [
     "Packed",
 ]
 
-# 0-based column indices, computed from CHECKLIST_HEADERS so they can
-# never silently drift out of sync if the header list is edited later.
+# 0-based column indices, computed from CHECKLIST_HEADERS
 _CHECKBOX_HEADERS = ("1st Contact", "2nd Contact", "Prescribed", "Packed")
 CHECKBOX_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in _CHECKBOX_HEADERS]
 CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("Consult")
 
-# Assumption (no explicit values given): a reasonable default follow-up
-# vocabulary. Change freely.
 CONSULT_OPTIONS = ["Pending", "Scheduled", "Completed", "No Show"]
 
 
@@ -80,8 +77,7 @@ def _get_client():
 
 
 def _sanitize_sheet_title(s):
-    """Google Sheets tab names can't contain : \\ / ? * [ ] and are capped
-    at 100 characters."""
+    """Google Sheets tab names can't contain : \\ / ? * [ ] and are capped at 100 chars."""
     s = str(s or "").strip()
     for ch in ("\\", "/", "?", "*", "[", "]", ":"):
         s = s.replace(ch, "")
@@ -137,19 +133,19 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
     """Adds conditional formatting rules to color the Consult status options."""
     color_map = {
         "Pending": {
-            "bg": {"red": 1.0, "green": 0.95, "blue": 0.8},      # Soft Yellow
+            "bg": {"red": 1.0, "green": 0.95, "blue": 0.8},
             "fg": {"red": 0.5, "green": 0.35, "blue": 0.0},
         },
         "Scheduled": {
-            "bg": {"red": 0.88, "green": 0.93, "blue": 1.0},     # Soft Blue
+            "bg": {"red": 0.88, "green": 0.93, "blue": 1.0},
             "fg": {"red": 0.1, "green": 0.3, "blue": 0.6},
         },
         "Completed": {
-            "bg": {"red": 0.85, "green": 0.94, "blue": 0.85},    # Soft Green
+            "bg": {"red": 0.85, "green": 0.94, "blue": 0.85},
             "fg": {"red": 0.1, "green": 0.4, "blue": 0.1},
         },
         "No Show": {
-            "bg": {"red": 0.98, "green": 0.85, "blue": 0.85},     # Soft Red
+            "bg": {"red": 0.98, "green": 0.85, "blue": 0.85},
             "fg": {"red": 0.6, "green": 0.1, "blue": 0.1},
         },
     }
@@ -183,15 +179,77 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
     return requests
 
 
+def _build_navigation_tab(spreadsheet, sources_info):
+    """Creates a 'Navigation' dashboard tab with big clickable source buttons."""
+    nav_title = "📌 Navigation"
+    
+    try:
+        nav_ws = spreadsheet.worksheet(nav_title)
+        nav_ws.clear()
+    except gspread.WorksheetNotFound:
+        nav_ws = spreadsheet.add_worksheet(title=nav_title, rows=50, cols=10)
+
+    # Reorder Navigation sheet to be first (index 0)
+    spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
+
+    # Setup Title Banner
+    values = [["CareLink Patient Checklist Navigation"], ["Select a Patient Source below to jump to its sheet:"], []]
+    
+    start_row = 5
+    button_requests = []
+
+    # Format Title
+    nav_ws.update(values=[["📌 CareLink Patient Checklist Navigation"], ["Click any button below to jump directly to that source sheet:"]], range_name="B2:B3")
+    nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
+    nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
+
+    # Create Big Button Rows
+    for idx, (title, count, gid) in enumerate(sources_info):
+        row_num = start_row + (idx * 3)  # 3 rows spacing per button
+        cell_range = f"B{row_num}:E{row_num+1}" # Merged 2x4 block for BIG button appearance
+        
+        formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
+        
+        nav_ws.update(values=[[formula]], range_name=f"B{row_num}")
+        nav_ws.merge_cells(cell_range)
+        
+        # Style as a big button
+        button_requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": nav_ws.id,
+                    "startRowIndex": row_num - 1,
+                    "endRowIndex": row_num + 1,
+                    "startColumnIndex": 1,
+                    "endColumnIndex": 5,
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "backgroundColor": {"red": 0.15, "green": 0.45, "blue": 0.85}, # Soft Blue Button
+                        "horizontalAlignment": "CENTER",
+                        "verticalAlignment": "MIDDLE",
+                        "textFormat": {
+                            "foregroundColor": {"red": 1.0, "green": 1.0, "blue": 1.0}, # White text
+                            "bold": True,
+                            "fontSize": 13,
+                        }
+                    }
+                },
+                "fields": "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)",
+            }
+        })
+
+    if button_requests:
+        spreadsheet.batch_update({"requests": button_requests})
+
+
 def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     client = _get_client()
 
     sheet_id = extract_spreadsheet_id(spreadsheet_url_or_id)
 
     if not sheet_id:
-        raise RuntimeError(
-            "No Google Spreadsheet ID was found."
-        )
+        raise RuntimeError("No Google Spreadsheet ID was found.")
 
     try:
         spreadsheet = client.open_by_key(sheet_id)
@@ -204,6 +262,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ) from e
     
     written = []
+    sources_info = [] # Stores (title, count, sheet_id)
     formatting_requests = []
 
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
@@ -241,8 +300,12 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         )
 
         written.append((title, n_data_rows))
+        sources_info.append((title, n_data_rows, ws.id))
 
     if formatting_requests:
         spreadsheet.batch_update({"requests": formatting_requests})
+
+    # Build Navigation Landing Page with Big Buttons
+    _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written
