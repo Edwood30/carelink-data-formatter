@@ -76,7 +76,7 @@ def _build_rendered_rows(df_med):
     return by_pin, order, cols
 
 
-def build_checklist_rows_by_source(df_med, df_patient):
+def build_checklist_rows_by_source(df_med, df_patient=None):
     """
     Returns (rows_by_source, seen_pins, med_cols, patient_meta, total_count)
     where rows_by_source is {source_label: [row_dict, ...]}, sorted
@@ -84,20 +84,26 @@ def build_checklist_rows_by_source(df_med, df_patient):
     """
     by_pin, order, med_cols = _build_rendered_rows(df_med)
 
-    patient_lookup, patient_meta = _build_patient_lookup(df_patient)
-    if patient_lookup is None:
-        return None, None, med_cols, None, 0
-
-    # Build source lookup directly from Registered Patients file
-    pat_cols = _detect_columns(df_patient)
+    patient_lookup = {}
+    patient_meta = {"pin_col": "N/A", "name_source": "N/A", "phone_col": "N/A", "address_col": "N/A"}
     patient_source_map = {}
 
-    if pat_cols["pin"] and pat_cols["source"]:
-        for _, row in df_patient.iterrows():
-            p_pin = clean_pin(_get(row, pat_cols["pin"]))
-            p_src = clean_str(_get(row, pat_cols["source"]))
-            if p_pin and p_src:
-                patient_source_map[p_pin] = p_src
+    if df_patient is not None:
+        lookup, meta = _build_patient_lookup(df_patient)
+        if lookup is None:
+            return None, None, med_cols, None, 0
+        
+        patient_lookup = lookup
+        patient_meta = meta
+
+        # Build source lookup directly from Registered Patients file
+        pat_cols = _detect_columns(df_patient)
+        if pat_cols["pin"] and pat_cols["source"]:
+            for _, row in df_patient.iterrows():
+                p_pin = clean_pin(_get(row, pat_cols["pin"]))
+                p_src = clean_str(_get(row, pat_cols["source"]))
+                if p_pin and p_src:
+                    patient_source_map[p_pin] = p_src
 
     all_rows = []
     seen_pins = set()
@@ -205,17 +211,20 @@ def render_checklist_tab():
         """,
             unsafe_allow_html=True,
         )
+        skip_registered = st.checkbox("✅ Check to skip (Rendered only / All patients registered)", key="t3_skip_pat")
+        
         file_patient = st.file_uploader(
             "Upload Registered Patients",
             type=["xlsx", "csv"],
             key="tab3_pat",
             label_visibility="collapsed",
+            disabled=skip_registered
         )
 
     def _sig(f):
         return f"{getattr(f, 'file_id', None) or f.name}-{f.size}" if f else None
 
-    file_signature = (_sig(file_med), _sig(file_patient))
+    file_signature = (_sig(file_med), _sig(file_patient), skip_registered)
     if st.session_state.get("t3_file_signature") != file_signature:
         st.session_state["t3_file_signature"] = file_signature
         st.session_state["t3_processed"] = False
@@ -251,17 +260,18 @@ def render_checklist_tab():
             sheet_url_input = PRESET_SPREADSHEETS[selected_option]
 
     with c_action:
-        both_uploaded = (file_med is not None) and (file_patient is not None)
+        has_med = (file_med is not None)
+        has_pat = (file_patient is not None) or skip_registered
         has_url = bool((sheet_url_input or "").strip())
         btn_click = st.button(
-            "Push to Google Sheets", key="btn_gen_tab3", disabled=not (both_uploaded and has_url)
+            "Push to Google Sheets", key="btn_gen_tab3", disabled=not (has_med and has_pat and has_url)
         )
 
-    if not both_uploaded or not has_url:
+    if not (has_med and has_pat and has_url):
         missing = []
-        if file_med is None:
+        if not has_med:
             missing.append("Rendered Medicines")
-        if file_patient is None:
+        if not has_pat:
             missing.append("Registered Patients")
         if not has_url:
             missing.append("a Google Sheet URL")
@@ -271,13 +281,13 @@ def render_checklist_tab():
             unsafe_allow_html=True,
         )
 
-    if both_uploaded and has_url and btn_click:
+    if has_med and has_pat and has_url and btn_click:
         st.session_state["t3_processed"] = True
 
         try:
-            with st.spinner("Combining both files and writing to Google Sheets..."):
+            with st.spinner("Combining files and writing to Google Sheets..."):
                 df_med = read_data_file(file_med)
-                df_patient = read_data_file(file_patient)
+                df_patient = read_data_file(file_patient) if not skip_registered else None
 
                 rows_by_source, seen_pins, med_cols, patient_meta, total = (
                     build_checklist_rows_by_source(
@@ -305,6 +315,7 @@ def render_checklist_tab():
                         "total": total,
                         "med_cols": med_cols,
                         "patient_meta": patient_meta,
+                        "skipped_patient_file": skip_registered
                     }
 
         except Exception as e:
@@ -345,6 +356,19 @@ def render_checklist_tab():
         with st.expander("Detected column mapping (click to verify)"):
             med_cols = result["med_cols"]
             patient_meta = result["patient_meta"]
+            
+            patient_meta_md = ""
+            if result.get("skipped_patient_file"):
+                patient_meta_md = "\n**Registered Patients file**\n- Skipped (Not uploaded/required)\n"
+            else:
+                patient_meta_md = f"""
+**Registered Patients file**
+- Patient PIN → `{patient_meta['pin_col']}`
+- Name → {patient_meta['name_source']}
+- Contact Number → {f"`{patient_meta['phone_col']}`" if patient_meta['phone_col'] else "not found — left blank"}
+- Full Address → {f"`{patient_meta['address_col']}`" if patient_meta['address_col'] else "not found — left blank"}
+                """
+
             st.markdown(
                 f"""
 **Rendered Medicines file**
@@ -354,11 +378,6 @@ def render_checklist_tab():
 - Full Address → {f"`{med_cols['address']}`" if med_cols['address'] else "not found — left blank"}
 - Medicine → {f"`{med_cols['medicine']}`" if med_cols['medicine'] else "not found — left blank"}
 - Patient Source → {f"`{med_cols['source']}`" if med_cols['source'] else "not found — left blank"}
-
-**Registered Patients file**
-- Patient PIN → `{patient_meta['pin_col']}`
-- Name → {patient_meta['name_source']}
-- Contact Number → {f"`{patient_meta['phone_col']}`" if patient_meta['phone_col'] else "not found — left blank"}
-- Full Address → {f"`{patient_meta['address_col']}`" if patient_meta['address_col'] else "not found — left blank"}
+{patient_meta_md}
                 """
             )
