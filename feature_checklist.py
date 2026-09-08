@@ -36,7 +36,6 @@ def _load_multisheet_file(file_obj):
         df["_is_multisheet"] = False
         return df
         
-    # Process Excel files (supports reading all sheets)
     sheets = pd.read_excel(file_obj, sheet_name=None)
     dfs = []
     is_multi = len(sheets) > 1
@@ -65,10 +64,10 @@ def _last_first_middle(cols, row):
     return last_val, first_val, middle_val
 
 
-def _build_rendered_rows(df_med):
+def _build_rendered_rows(df_med, is_single_file_mode=False):
     """One row per PATIENT (not per medicine) — medicines they received
-    are aggregated into a single comma-separated cell. Grouped by the
-    detected Patient Source for each patient."""
+    are aggregated into a single comma-separated cell. 
+    If is_single_file_mode is True, assigns all rows to a single unified 'Combined Patient Checklist' source."""
     cols = _detect_columns(df_med)
     by_pin = {}
     order = []
@@ -78,15 +77,17 @@ def _build_rendered_rows(df_med):
         last, first, middle = _last_first_middle(cols, row)
         key = pin or f"NO_PIN::{last.lower()}::{first.lower()}"
 
-        # Resolve Source: Prioritize Excel Sheet Name if it's a multi-sheet file
-        col_src = clean_str(_get(row, cols["source"])) if cols["source"] else ""
-        is_multi = row.get("_is_multisheet", False)
-        sheet_name = row.get("_sheet_name", "")
-        
-        if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
-            chosen_source = sheet_name
+        if is_single_file_mode:
+            chosen_source = "Combined Patient Checklist"
         else:
-            chosen_source = col_src or sheet_name
+            col_src = clean_str(_get(row, cols["source"])) if cols["source"] else ""
+            is_multi = row.get("_is_multisheet", False)
+            sheet_name = row.get("_sheet_name", "")
+            
+            if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
+                chosen_source = sheet_name
+            else:
+                chosen_source = col_src or sheet_name
 
         if key not in by_pin:
             by_pin[key] = {
@@ -118,13 +119,14 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
     where rows_by_source is {source_label: [row_dict, ...]}, sorted
     alphabetically by Last Name (then First Name) within each source.
     """
-    by_pin, order, med_cols = _build_rendered_rows(df_med)
+    is_single_file_mode = (df_patient is None)
+    by_pin, order, med_cols = _build_rendered_rows(df_med, is_single_file_mode=is_single_file_mode)
 
     patient_lookup = {}
     patient_meta = {"pin_col": "N/A", "name_source": "N/A", "phone_col": "N/A", "address_col": "N/A"}
     patient_source_map = {}
 
-    if df_patient is not None:
+    if not is_single_file_mode:
         lookup, meta = _build_patient_lookup(df_patient)
         if lookup is None:
             return None, None, med_cols, None, 0
@@ -132,7 +134,6 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
         patient_lookup = lookup
         patient_meta = meta
 
-        # Build source lookup directly from Registered Patients file
         pat_cols = _detect_columns(df_patient)
         if pat_cols["pin"]:
             for _, row in df_patient.iterrows():
@@ -153,14 +154,13 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
     all_rows = []
     seen_pins = set()
 
-    # Process patients from Rendered Medicines
     for key in order:
         info = by_pin[key]
         pin = info["_pin"]
         if pin:
             seen_pins.add(pin)
 
-        source = info["PATIENT SOURCE"] or patient_source_map.get(pin, "")
+        source = info["PATIENT SOURCE"] if is_single_file_mode else (info["PATIENT SOURCE"] or patient_source_map.get(pin, ""))
 
         all_rows.append(
             {
@@ -176,26 +176,26 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
             }
         )
 
-    # Process remaining registered patients awaiting follow-up
-    for pin, info in patient_lookup.items():
-        if pin in seen_pins:
-            continue
+    if not is_single_file_mode:
+        for pin, info in patient_lookup.items():
+            if pin in seen_pins:
+                continue
 
-        source = patient_source_map.get(pin, "")
+            source = patient_source_map.get(pin, "")
 
-        all_rows.append(
-            {
-                "PATIENT SOURCE": source,
-                "CONTACT NUMBER": info.get("Contact Number", ""),
-                "LAST NAME": info.get("Last Name", ""),
-                "FIRST NAME": info.get("First Name", ""),
-                "MIDDLE NAME": info.get("Middle Name", ""),
-                "ADDRESS": info.get("Full Address", ""),
-                "NOTES": "",
-                "MEDICINE RENDERED": "",
-                "WAYBILL": False,
-            }
-        )
+            all_rows.append(
+                {
+                    "PATIENT SOURCE": source,
+                    "CONTACT NUMBER": info.get("Contact Number", ""),
+                    "LAST NAME": info.get("Last Name", ""),
+                    "FIRST NAME": info.get("First Name", ""),
+                    "MIDDLE NAME": info.get("Middle Name", ""),
+                    "ADDRESS": info.get("Full Address", ""),
+                    "NOTES": "",
+                    "MEDICINE RENDERED": "",
+                    "WAYBILL": False,
+                }
+            )
 
     all_rows.sort(key=lambda r: (r["LAST NAME"].strip().lower(), r["FIRST NAME"].strip().lower()))
 
@@ -230,7 +230,6 @@ def render_checklist_tab():
     col1, col2 = st.columns(2)
 
     with col1:
-        # Invisible spacer to keep column 1 vertically aligned with column 2's checkbox
         st.markdown("<div style='height: 33px;'></div>", unsafe_allow_html=True)
         st.markdown(
             """
@@ -251,7 +250,6 @@ def render_checklist_tab():
     with col2:
         skip_registered = st.checkbox("Skip file", key="t3_skip_pat")
         
-        # Applies low contrast styling dynamically when the checkbox is checked
         card_style = "opacity: 0.4; filter: grayscale(100%); pointer-events: none; transition: all 0.3s ease;" if skip_registered else "transition: all 0.3s ease;"
         
         st.markdown(
