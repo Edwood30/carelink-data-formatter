@@ -197,9 +197,17 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
     all_rows.sort(key=lambda r: (r["LAST NAME"].strip().lower(), r["FIRST NAME"].strip().lower()))
 
     rows_by_source = {}
-    for row in all_rows:
-        source_label = row["PATIENT SOURCE"].strip() or "Unspecified Source"
-        rows_by_source.setdefault(source_label, []).append(row)
+    
+    if is_single_file_mode:
+        # If ONLY the rendered medicines file is uploaded (with skip checked), 
+        # bundle ALL combined rows into ONE single worksheet tab named "Combined Checklist",
+        # while keeping each row's individual PATIENT SOURCE value intact.
+        rows_by_source["Combined Checklist"] = all_rows
+    else:
+        # If BOTH files are uploaded, group into individual tabs per Patient Source.
+        for row in all_rows:
+            source_label = row["PATIENT SOURCE"].strip() or "Unspecified Source"
+            rows_by_source.setdefault(source_label, []).append(row)
 
     return rows_by_source, seen_pins, med_cols, patient_meta, len(all_rows)
 
