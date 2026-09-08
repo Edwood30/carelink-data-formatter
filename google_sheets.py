@@ -10,6 +10,7 @@ See README.md for the full setup walkthrough. This module does nothing
 (and is_configured() returns False) until that's done.
 """
 import re
+import time
 
 import gspread
 import streamlit as st
@@ -240,7 +241,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
         nav_ws = spreadsheet.worksheet(nav_title)
         nav_ws.clear()
         
-        # Clear any existing merges to avoid overlapping ghost formatting
         spreadsheet.batch_update({
             "requests": [{"unmergeCells": {"range": {"sheetId": nav_ws.id}}}]
         })
@@ -254,7 +254,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
     start_row = 5
     button_requests = []
     
-    # Bundle text and formulas to upload them all at once
     update_data = [
         {
             "range": "B2:B3",
@@ -303,14 +302,12 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
 
-    # Critical fix: Use USER_ENTERED so the formulas are evaluated, not treated as RAW text
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
+    time.sleep(0.5) # Rate limit protection pause
 
-    # Re-apply text styling to headers
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
 
-    # Push all styling for buttons in one batch
     if button_requests:
         spreadsheet.batch_update({"requests": button_requests})
 
@@ -335,7 +332,6 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     
     written = []
     sources_info = []
-    formatting_requests = []
 
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
         rows = rows_by_source[source_label]
@@ -357,30 +353,28 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ws.format("1:1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
 
-        # Checkbox validation for 1ST CONTACT, 2ND CONTACT, PRESCRIBED, PACKED, WAYBILL
+        # Collect formatting requests specific to this worksheet tab
+        tab_formatting_requests = []
         for col_idx in CHECKBOX_COL_INDICES:
-            formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
+            tab_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
-        # Consult dropdown validation
-        formatting_requests.append(
+        tab_formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
         )
-
-        # Highlight entire row green when WAYBILL is checked
-        formatting_requests.append(
+        tab_formatting_requests.append(
             _waybill_row_highlight_request(ws.id, n_data_rows, n_cols, WAYBILL_COL_INDEX)
         )
-
-        # Consult option colors (Pending, Scheduled, Completed, No Show)
-        formatting_requests.extend(
+        tab_formatting_requests.extend(
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
+        # Apply formatting per sheet to avoid combining too many requests in one massive payload
+        if tab_formatting_requests:
+            spreadsheet.batch_update({"requests": tab_formatting_requests})
+            time.sleep(0.3)  # Small pacing delay to prevent 429 Rate Limit quotas
+
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
-
-    if formatting_requests:
-        spreadsheet.batch_update({"requests": formatting_requests})
 
     # Build Navigation Landing Page
     _build_navigation_tab(spreadsheet, sources_info)
