@@ -12,6 +12,7 @@ Medicines file) and feature_merger (for the Registered Patients lookup)
 rather than re-implemented, so fuzzy-matching behavior stays identical
 across every feature in the app.
 """
+import pandas as pd
 import streamlit as st
 
 import google_sheets
@@ -25,6 +26,30 @@ PRESET_SPREADSHEETS = {
     "CALOOCAN SITES": "https://docs.google.com/spreadsheets/d/1xDj3gy4ha-D9yXext4vVQeaECs-QdirIAqWcSp5dU_M/edit?gid=22834876#gid=22834876",
     "PRIVATE COMPANIES": "https://docs.google.com/spreadsheets/d/1y92gEzc2D8kHeO4r4lE9_Hd4SlURt_WYkPqUqKGs-GE/edit?gid=492635901#gid=492635901",
 }
+
+
+def _load_multisheet_file(file_obj):
+    """Reads CSV or Excel. For Excel, combines all sheets and flags multisheet status."""
+    if file_obj.name.lower().endswith(".csv"):
+        df = read_data_file(file_obj)
+        df["_sheet_name"] = ""
+        df["_is_multisheet"] = False
+        return df
+        
+    # Process Excel files (supports reading all sheets)
+    sheets = pd.read_excel(file_obj, sheet_name=None)
+    dfs = []
+    is_multi = len(sheets) > 1
+    
+    for name, df in sheets.items():
+        df["_sheet_name"] = str(name).strip()
+        df["_is_multisheet"] = is_multi
+        dfs.append(df)
+        
+    if not dfs:
+        return pd.DataFrame()
+        
+    return pd.concat(dfs, ignore_index=True)
 
 
 def _last_first_middle(cols, row):
@@ -53,6 +78,16 @@ def _build_rendered_rows(df_med):
         last, first, middle = _last_first_middle(cols, row)
         key = pin or f"NO_PIN::{last.lower()}::{first.lower()}"
 
+        # Resolve Source: Prioritize Excel Sheet Name if it's a multi-sheet file
+        col_src = clean_str(_get(row, cols["source"])) if cols["source"] else ""
+        is_multi = row.get("_is_multisheet", False)
+        sheet_name = row.get("_sheet_name", "")
+        
+        if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
+            chosen_source = sheet_name
+        else:
+            chosen_source = col_src or sheet_name
+
         if key not in by_pin:
             by_pin[key] = {
                 "LAST NAME": last,
@@ -60,7 +95,7 @@ def _build_rendered_rows(df_med):
                 "MIDDLE NAME": middle,
                 "CONTACT NUMBER": format_contact_number(_get(row, cols["phone"])) if cols["phone"] else "",
                 "ADDRESS": clean_str(_get(row, cols["address"])) if cols["address"] else "",
-                "PATIENT SOURCE": clean_str(_get(row, cols["source"])) if cols["source"] else "",
+                "PATIENT SOURCE": chosen_source,
                 "NOTES": clean_str(_get(row, cols["notes"])) if cols["notes"] else "",
                 "_medicines": [],
                 "_pin": pin,
@@ -70,8 +105,9 @@ def _build_rendered_rows(df_med):
         medicine = clean_str(_get(row, cols["medicine"])) if cols["medicine"] else ""
         if medicine and medicine not in by_pin[key]["_medicines"]:
             by_pin[key]["_medicines"].append(medicine)
-        if not by_pin[key]["PATIENT SOURCE"] and cols["source"]:
-            by_pin[key]["PATIENT SOURCE"] = clean_str(_get(row, cols["source"]))
+            
+        if not by_pin[key]["PATIENT SOURCE"] and chosen_source:
+            by_pin[key]["PATIENT SOURCE"] = chosen_source
 
     return by_pin, order, cols
 
@@ -98,10 +134,19 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
 
         # Build source lookup directly from Registered Patients file
         pat_cols = _detect_columns(df_patient)
-        if pat_cols["pin"] and pat_cols["source"]:
+        if pat_cols["pin"]:
             for _, row in df_patient.iterrows():
                 p_pin = clean_pin(_get(row, pat_cols["pin"]))
-                p_src = clean_str(_get(row, pat_cols["source"]))
+                col_src = clean_str(_get(row, pat_cols["source"])) if pat_cols["source"] else ""
+                
+                is_multi = row.get("_is_multisheet", False)
+                sheet_name = row.get("_sheet_name", "")
+                
+                if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
+                    p_src = sheet_name
+                else:
+                    p_src = col_src or sheet_name
+
                 if p_pin and p_src:
                     patient_source_map[p_pin] = p_src
 
@@ -292,8 +337,8 @@ def render_checklist_tab():
 
         try:
             with st.spinner("Combining files and writing to Google Sheets..."):
-                df_med = read_data_file(file_med)
-                df_patient = read_data_file(file_patient) if not skip_registered else None
+                df_med = _load_multisheet_file(file_med)
+                df_patient = _load_multisheet_file(file_patient) if not skip_registered else None
 
                 rows_by_source, seen_pins, med_cols, patient_meta, total = (
                     build_checklist_rows_by_source(
