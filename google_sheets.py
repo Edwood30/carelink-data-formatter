@@ -250,7 +250,7 @@ def _build_navigation_tab(spreadsheet, sources_info):
         )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
-    time.sleep(0.5)
+    time.sleep(0.6)
 
     start_row = 5
     button_requests = []
@@ -314,11 +314,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
         })
 
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.6)
+    time.sleep(0.8)
 
     if merge_requests:
         spreadsheet.batch_update({"requests": merge_requests})
-        time.sleep(0.6)
+        time.sleep(0.8)
 
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
@@ -348,7 +348,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     written = []
     sources_info = []
 
-    # Process worksheets safely one-by-one with pacing delays to prevent API 429 rate limit exceptions
+    # Process worksheets safely one-by-one with strict pacing delays to prevent API 429 rate limit errors
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
         rows = rows_by_source[source_label]
         title = _sanitize_sheet_title(source_label)
@@ -362,15 +362,47 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             ws = spreadsheet.add_worksheet(
                 title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
             )
-            time.sleep(0.8)  # Pause safely after creating a new worksheet tab
+            time.sleep(1.0)  # Pause safely after creating a new worksheet tab
 
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
-        ws.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
-        ws.format("1:1", {"textFormat": {"bold": True}})
-        ws.freeze(rows=1)
-
+        
+        # Combine value writing, bold header, and freeze row into a single batched payload
+        body = {
+            "valueInputOption": "USER_ENTERED",
+            "data": [{"range": f"{title}!A1", "values": values}]
+        }
+        client.values_batch_update(spreadsheet.id, body)
+        
         # Collect formatting requests specific to this worksheet tab
-        tab_formatting_requests = []
+        tab_formatting_requests = [
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 1,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": n_cols
+                    },
+                    "cell": {
+                        "userEnteredFormat": {
+                            "textFormat": {"bold": True}
+                        }
+                    },
+                    "fields": "userEnteredFormat.textFormat.bold"
+                }
+            },
+            {
+                "updateSheetProperties": {
+                    "properties": {
+                        "sheetId": ws.id,
+                        "gridProperties": {"frozenRowCount": 1}
+                    },
+                    "fields": "gridProperties.frozenRowCount"
+                }
+            }
+        ]
+
         for col_idx in CHECKBOX_COL_INDICES:
             tab_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
@@ -384,10 +416,10 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
-        # Apply formatting per sheet in batch with a safe pacing pause
+        # Apply formatting per sheet in batch with a safe 1.2-second pause to strictly respect rate limits
         if tab_formatting_requests:
             spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(0.8)  # Strategic pacing delay to strictly satisfy Google API rate quotas
+            time.sleep(1.2)  
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
