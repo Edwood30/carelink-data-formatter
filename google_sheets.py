@@ -351,7 +351,7 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     # 1. Fetch all existing worksheets once to avoid repetitive API queries
     existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
 
-    # 2. Pre-create any missing worksheets in one single batch request to save write quotas
+    # 2. Pre-create any missing worksheets in one single batch request
     missing_titles = [
         _sanitize_sheet_title(label) 
         for label in rows_by_source.keys() 
@@ -381,12 +381,12 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         ws.clear()
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
         
-        # Batch write values safely
+        # Batch write values safely using spreadsheet.values_batch_update
         body = {
             "valueInputOption": "USER_ENTERED",
             "data": [{"range": f"{title}!A1", "values": values}]
         }
-        client.values_batch_update(spreadsheet.id, body)
+        spreadsheet.values_batch_update(body)
         
         # Collect formatting requests specific to this worksheet tab
         tab_formatting_requests = [
