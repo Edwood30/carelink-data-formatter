@@ -3,7 +3,7 @@ Google Sheets integration for the Patient Follow-Up Checklist.
 
 Instead of generating a downloadable .xlsx, this writes each Patient
 Source into its own worksheet (tab) inside one fixed Google Spreadsheet
-— same URL every time, one tab per source, updated in place on every run.
+— same URL every time, updated in place on every run.
 
 Requires a Google Cloud service account configured in Streamlit secrets.
 See README.md for the full setup walkthrough. This module does nothing
@@ -348,25 +348,40 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     written = []
     sources_info = []
 
-    # Process worksheets safely one-by-one with strict pacing delays to prevent API 429 rate limit errors
+    # 1. Fetch all existing worksheets once to avoid repetitive API queries
+    existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+
+    # 2. Pre-create any missing worksheets in one single batch request to save write quotas
+    missing_titles = [
+        _sanitize_sheet_title(label) 
+        for label in rows_by_source.keys() 
+        if _sanitize_sheet_title(label) not in existing_worksheets and _sanitize_sheet_title(label) != "📌 Navigation"
+    ]
+    
+    if missing_titles:
+        add_requests = [{"addSheet": {"properties": {"title": title}}} for title in missing_titles]
+        spreadsheet.batch_update({"requests": add_requests})
+        time.sleep(1.5)  # Safe pause after bulk creation
+        existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+
+    # 3. Process each worksheet tab securely with pacing delays
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
         rows = rows_by_source[source_label]
         title = _sanitize_sheet_title(source_label)
         n_data_rows = len(rows)
         n_cols = len(CHECKLIST_HEADERS)
 
-        try:
-            ws = spreadsheet.worksheet(title)
-            ws.clear()
-        except gspread.WorksheetNotFound:
+        ws = existing_worksheets.get(title)
+        if not ws:
             ws = spreadsheet.add_worksheet(
                 title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
             )
-            time.sleep(1.0)  # Pause safely after creating a new worksheet tab
+            time.sleep(1.0)
 
+        ws.clear()
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
         
-        # Combine value writing, bold header, and freeze row into a single batched payload
+        # Batch write values safely
         body = {
             "valueInputOption": "USER_ENTERED",
             "data": [{"range": f"{title}!A1", "values": values}]
@@ -416,10 +431,10 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
-        # Apply formatting per sheet in batch with a safe 1.2-second pause to strictly respect rate limits
+        # Apply formatting per sheet with a safe 1.5-second pause to strictly respect quota limits
         if tab_formatting_requests:
             spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(1.2)  
+            time.sleep(1.5)  
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
