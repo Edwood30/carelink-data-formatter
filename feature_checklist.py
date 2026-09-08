@@ -185,6 +185,8 @@ def render_checklist_tab():
     col1, col2 = st.columns(2)
 
     with col1:
+        # Invisible spacer to keep column 1 vertically aligned with column 2's checkbox
+        st.markdown("<div style='height: 33px;'></div>", unsafe_allow_html=True)
         st.markdown(
             """
         <div class="uploader-card">
@@ -202,16 +204,20 @@ def render_checklist_tab():
         )
 
     with col2:
+        skip_registered = st.checkbox("Skip file", key="t3_skip_pat")
+        
+        # Applies low contrast styling dynamically when the checkbox is checked
+        card_style = "opacity: 0.4; filter: grayscale(100%); pointer-events: none; transition: all 0.3s ease;" if skip_registered else "transition: all 0.3s ease;"
+        
         st.markdown(
-            """
-        <div class="uploader-card">
+            f"""
+        <div class="uploader-card" style="{card_style}">
             <div class="uploader-title uploader-accent-green">02 — REGISTERED PATIENTS FILE</div>
             <div class="uploader-sub">Upload Registered Patients (.xlsx or .csv)</div>
         </div>
         """,
             unsafe_allow_html=True,
         )
-        skip_registered = st.checkbox("✅ Check to skip (Rendered only / All patients registered)", key="t3_skip_pat")
         
         file_patient = st.file_uploader(
             "Upload Registered Patients",
