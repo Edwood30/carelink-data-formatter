@@ -234,7 +234,7 @@ def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_id
 
 
 def _build_navigation_tab(spreadsheet, sources_info):
-    """Creates a 'Navigation' dashboard tab with big clickable source buttons."""
+    """Creates a 'Navigation' dashboard tab with big clickable source buttons using batched requests."""
     nav_title = "📌 Navigation"
     
     try:
@@ -250,9 +250,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
         )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
+    time.sleep(0.3)
 
     start_row = 5
     button_requests = []
+    merge_requests = []
     
     update_data = [
         {
@@ -266,8 +268,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
 
     for idx, (title, count, gid) in enumerate(sources_info):
         row_num = start_row + (idx * 3)
-        cell_range = f"B{row_num}:E{row_num+1}"
-        
         formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
         
         update_data.append({
@@ -275,7 +275,19 @@ def _build_navigation_tab(spreadsheet, sources_info):
             "values": [[formula]]
         })
         
-        nav_ws.merge_cells(cell_range)
+        # Batch merge request instead of individual API calls
+        merge_requests.append({
+            "mergeCells": {
+                "range": {
+                    "sheetId": nav_ws.id,
+                    "startRowIndex": row_num - 1,
+                    "endRowIndex": row_num + 1,
+                    "startColumnIndex": 1,
+                    "endColumnIndex": 5,
+                },
+                "mergeType": "MERGE_ALL"
+            }
+        })
         
         button_requests.append({
             "repeatCell": {
@@ -302,12 +314,20 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
 
+    # Write titles & formulas
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.5) # Rate limit protection pause
+    time.sleep(0.4)
 
+    # Execute all cell merges in a single batch request
+    if merge_requests:
+        spreadsheet.batch_update({"requests": merge_requests})
+        time.sleep(0.3)
+
+    # Apply header font styles
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
 
+    # Apply button background and text formatting in a single batch request
     if button_requests:
         spreadsheet.batch_update({"requests": button_requests})
 
@@ -368,15 +388,15 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
-        # Apply formatting per sheet to avoid combining too many requests in one massive payload
+        # Apply formatting per sheet in batch
         if tab_formatting_requests:
             spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(0.3)  # Small pacing delay to prevent 429 Rate Limit quotas
+            time.sleep(0.4)  # Strategic pacing delay to safely satisfy Google API rate quotas
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
 
-    # Build Navigation Landing Page
+    # Build Navigation Landing Page with batched merges
     _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written
