@@ -250,7 +250,7 @@ def _build_navigation_tab(spreadsheet, sources_info):
         )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
-    time.sleep(0.3)
+    time.sleep(0.4)
 
     start_row = 5
     button_requests = []
@@ -275,7 +275,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
             "values": [[formula]]
         })
         
-        # Batch merge request instead of individual API calls
         merge_requests.append({
             "mergeCells": {
                 "range": {
@@ -314,20 +313,16 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
 
-    # Write titles & formulas
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.4)
+    time.sleep(0.5)
 
-    # Execute all cell merges in a single batch request
     if merge_requests:
         spreadsheet.batch_update({"requests": merge_requests})
-        time.sleep(0.3)
+        time.sleep(0.5)
 
-    # Apply header font styles
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
 
-    # Apply button background and text formatting in a single batch request
     if button_requests:
         spreadsheet.batch_update({"requests": button_requests})
 
@@ -362,7 +357,6 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         try:
             ws = spreadsheet.worksheet(title)
             ws.clear()
-            ws.resize(rows=max(n_data_rows + 1, 2), cols=n_cols)
         except gspread.WorksheetNotFound:
             ws = spreadsheet.add_worksheet(
                 title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
@@ -388,15 +382,15 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
-        # Apply formatting per sheet in batch
+        # Apply formatting per sheet in batch with safe pacing delay
         if tab_formatting_requests:
             spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(0.4)  # Strategic pacing delay to safely satisfy Google API rate quotas
+            time.sleep(0.6)  # Generous safety pause to prevent hitting API write rate limits
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
 
-    # Build Navigation Landing Page with batched merges
+    # Build Navigation Landing Page with batched merges and pauses
     _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written
