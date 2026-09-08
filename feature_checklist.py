@@ -64,10 +64,10 @@ def _last_first_middle(cols, row):
     return last_val, first_val, middle_val
 
 
-def _build_rendered_rows(df_med, is_single_file_mode=False):
+def _build_rendered_rows(df_med):
     """One row per PATIENT (not per medicine) — medicines they received
-    are aggregated into a single comma-separated cell. 
-    If is_single_file_mode is True, assigns all rows to a single unified 'Combined Patient Checklist' source."""
+    are aggregated into a single comma-separated cell. Grouped by the
+    detected Patient Source for each patient."""
     cols = _detect_columns(df_med)
     by_pin = {}
     order = []
@@ -77,17 +77,14 @@ def _build_rendered_rows(df_med, is_single_file_mode=False):
         last, first, middle = _last_first_middle(cols, row)
         key = pin or f"NO_PIN::{last.lower()}::{first.lower()}"
 
-        if is_single_file_mode:
-            chosen_source = "Combined Patient Checklist"
+        col_src = clean_str(_get(row, cols["source"])) if cols["source"] else ""
+        is_multi = row.get("_is_multisheet", False)
+        sheet_name = row.get("_sheet_name", "")
+        
+        if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
+            chosen_source = sheet_name
         else:
-            col_src = clean_str(_get(row, cols["source"])) if cols["source"] else ""
-            is_multi = row.get("_is_multisheet", False)
-            sheet_name = row.get("_sheet_name", "")
-            
-            if is_multi and sheet_name and not sheet_name.lower().startswith("sheet"):
-                chosen_source = sheet_name
-            else:
-                chosen_source = col_src or sheet_name
+            chosen_source = col_src or sheet_name
 
         if key not in by_pin:
             by_pin[key] = {
@@ -120,7 +117,7 @@ def build_checklist_rows_by_source(df_med, df_patient=None):
     alphabetically by Last Name (then First Name) within each source.
     """
     is_single_file_mode = (df_patient is None)
-    by_pin, order, med_cols = _build_rendered_rows(df_med, is_single_file_mode=is_single_file_mode)
+    by_pin, order, med_cols = _build_rendered_rows(df_med)
 
     patient_lookup = {}
     patient_meta = {"pin_col": "N/A", "name_source": "N/A", "phone_col": "N/A", "address_col": "N/A"}
