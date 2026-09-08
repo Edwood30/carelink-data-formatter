@@ -250,7 +250,7 @@ def _build_navigation_tab(spreadsheet, sources_info):
         )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
-    time.sleep(0.4)
+    time.sleep(0.5)
 
     start_row = 5
     button_requests = []
@@ -314,11 +314,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
         })
 
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.5)
+    time.sleep(0.6)
 
     if merge_requests:
         spreadsheet.batch_update({"requests": merge_requests})
-        time.sleep(0.5)
+        time.sleep(0.6)
 
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
@@ -348,22 +348,40 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     written = []
     sources_info = []
 
+    # 1. Fetch all existing worksheets in a single API call to prevent WorksheetNotFound & query spam
+    existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+    
+    # 2. Pre-create any missing worksheets in one single batch request
+    missing_titles = [
+        _sanitize_sheet_title(label) 
+        for label in rows_by_source.keys() 
+        if _sanitize_sheet_title(label) not in existing_worksheets and _sanitize_sheet_title(label) != "📌 Navigation"
+    ]
+    
+    if missing_titles:
+        add_requests = [{"addSheet": {"properties": {"title": title}}} for title in missing_titles]
+        spreadsheet.batch_update({"requests": add_requests})
+        time.sleep(1.0)  # Safe pause after creating sheets
+        # Refresh worksheets map
+        existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
+
+    # 3. Process each source tab with heavy batching and pacing
     for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
         rows = rows_by_source[source_label]
         title = _sanitize_sheet_title(source_label)
         n_data_rows = len(rows)
         n_cols = len(CHECKLIST_HEADERS)
 
-        try:
-            ws = spreadsheet.worksheet(title)
-            ws.clear()
-        except gspread.WorksheetNotFound:
-            ws = spreadsheet.add_worksheet(
-                title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
-            )
+        ws = existing_worksheets.get(title)
+        if not ws:
+            ws = spreadsheet.add_worksheet(title=title, rows=max(n_data_rows + 1, 2), cols=n_cols)
+            time.sleep(0.5)
 
+        ws.clear()
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
-        ws.update(values=values, range_name="A1")
+        
+        # Batch update values
+        ws.update(values=values, range_name="A1", value_input_option="USER_ENTERED")
         ws.format("1:1", {"textFormat": {"bold": True}})
         ws.freeze(rows=1)
 
@@ -382,10 +400,10 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
 
-        # Apply formatting per sheet in batch with safe pacing delay
+        # Apply formatting per sheet in batch with a safe 1-second pause to strictly respect rate limits
         if tab_formatting_requests:
             spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(0.6)  # Generous safety pause to prevent hitting API write rate limits
+            time.sleep(1.0)  
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
