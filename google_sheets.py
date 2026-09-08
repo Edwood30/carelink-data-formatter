@@ -17,6 +17,13 @@ from google.oauth2.service_account import Credentials
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# Preset Google Sheets mappings for the dropdown selector
+PRESET_SPREADSHEETS = {
+    "NCJJ SOURCES": "https://docs.google.com/spreadsheets/d/1hGFuP1OiZxT2XjXI_RE-7UQ-C9tEk9dV_cJc1u4c7Gg/edit?gid=861907105#gid=861907105",
+    "CALOOCAN SITES": "https://docs.google.com/spreadsheets/d/1xDj3gy4ha-D9yXext4vVQeaECs-QdirIAqWcSp5dU_M/edit?gid=22834876#gid=22834876",
+    "PRIVATE COMPANIES": "https://docs.google.com/spreadsheets/d/1y92gEzc2D8kHeO4r4lE9_Hd4SlURt_WYkPqUqKGs-GE/edit?gid=492635901#gid=492635901",
+}
+
 CHECKLIST_HEADERS = [
     "PATIENT SOURCE",
     "CONTACT NUMBER",
@@ -232,17 +239,31 @@ def _build_navigation_tab(spreadsheet, sources_info):
     try:
         nav_ws = spreadsheet.worksheet(nav_title)
         nav_ws.clear()
+        
+        # Clear any existing merges to avoid overlapping ghost formatting
+        spreadsheet.batch_update({
+            "requests": [{"unmergeCells": {"range": {"sheetId": nav_ws.id}}}]
+        })
     except gspread.WorksheetNotFound:
-        nav_ws = spreadsheet.add_worksheet(title=nav_title, rows=50, cols=10)
+        nav_ws = spreadsheet.add_worksheet(
+            title=nav_title, rows=max(50, len(sources_info) * 4 + 10), cols=10
+        )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
 
     start_row = 5
     button_requests = []
-
-    nav_ws.update(values=[["📌 CareLink Patient Checklist Navigation"], ["Click any button below to jump directly to that source sheet:"]], range_name="B2:B3")
-    nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
-    nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
+    
+    # Bundle text and formulas to upload them all at once
+    update_data = [
+        {
+            "range": "B2:B3",
+            "values": [
+                ["📌 CareLink Patient Checklist Navigation"],
+                ["Click any button below to jump directly to that source sheet:"]
+            ]
+        }
+    ]
 
     for idx, (title, count, gid) in enumerate(sources_info):
         row_num = start_row + (idx * 3)
@@ -250,7 +271,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
         
         formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
         
-        nav_ws.update(values=[[formula]], range_name=f"B{row_num}")
+        update_data.append({
+            "range": f"B{row_num}",
+            "values": [[formula]]
+        })
+        
         nav_ws.merge_cells(cell_range)
         
         button_requests.append({
@@ -278,6 +303,14 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
 
+    # Critical fix: Use USER_ENTERED so the formulas are evaluated, not treated as RAW text
+    nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
+
+    # Re-apply text styling to headers
+    nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
+    nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
+
+    # Push all styling for buttons in one batch
     if button_requests:
         spreadsheet.batch_update({"requests": button_requests})
 

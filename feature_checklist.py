@@ -20,6 +20,13 @@ from feature_merger import _build_patient_lookup
 from utils import clean_pin, clean_str, format_contact_number, read_data_file, split_name_fallback
 
 
+PRESET_SPREADSHEETS = {
+    "NCJJ SOURCES": "https://docs.google.com/spreadsheets/d/1hGFuP1OiZxT2XjXI_RE-7UQ-C9tEk9dV_cJc1u4c7Gg/edit?gid=861907105#gid=861907105",
+    "CALOOCAN SITES": "https://docs.google.com/spreadsheets/d/1xDj3gy4ha-D9yXext4vVQeaECs-QdirIAqWcSp5dU_M/edit?gid=22834876#gid=22834876",
+    "PRIVATE COMPANIES": "https://docs.google.com/spreadsheets/d/1y92gEzc2D8kHeO4r4lE9_Hd4SlURt_WYkPqUqKGs-GE/edit?gid=492635901#gid=492635901",
+}
+
+
 def _last_first_middle(cols, row):
     last_val = clean_str(_get(row, cols["last"])) if cols["last"] else ""
     first_val = clean_str(_get(row, cols["first"])) if cols["first"] else ""
@@ -223,13 +230,25 @@ def render_checklist_tab():
 
     c_url, c_action = st.columns([3.2, 1.2])
     with c_url:
-        sheet_url_input = st.text_input(
-            "Google Sheet URL",
-            value=google_sheets.default_spreadsheet_url(),
-            key="t3_sheet_url",
-            label_visibility="collapsed",
-            placeholder="Paste the Google Sheet URL…",
+        options = list(PRESET_SPREADSHEETS.keys()) + ["Custom / Enter URL manually"]
+        selected_option = st.selectbox(
+            "Select Destination Google Sheet",
+            options=options,
+            index=0,
+            key="t3_sheet_selector",
+            label_visibility="collapsed"
         )
+        
+        if selected_option == "Custom / Enter URL manually":
+            sheet_url_input = st.text_input(
+                "Google Sheet URL",
+                value=google_sheets.default_spreadsheet_url(),
+                key="t3_sheet_url",
+                label_visibility="collapsed",
+                placeholder="Paste the Google Sheet URL…"
+            )
+        else:
+            sheet_url_input = PRESET_SPREADSHEETS[selected_option]
 
     with c_action:
         both_uploaded = (file_med is not None) and (file_patient is not None)
