@@ -250,7 +250,7 @@ def _build_navigation_tab(spreadsheet, sources_info):
         )
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
-    time.sleep(0.6)
+    time.sleep(0.4)
 
     start_row = 5
     button_requests = []
@@ -314,11 +314,11 @@ def _build_navigation_tab(spreadsheet, sources_info):
         })
 
     nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.8)
+    time.sleep(0.4)
 
     if merge_requests:
         spreadsheet.batch_update({"requests": merge_requests})
-        time.sleep(0.8)
+        time.sleep(0.4)
 
     nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
     nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
@@ -329,7 +329,6 @@ def _build_navigation_tab(spreadsheet, sources_info):
 
 def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     client = _get_client()
-
     sheet_id = extract_spreadsheet_id(spreadsheet_url_or_id)
 
     if not sheet_id:
@@ -348,98 +347,115 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     written = []
     sources_info = []
 
-    # 1. Fetch all existing worksheets once to avoid repetitive API queries
+    # 1. Fetch all existing worksheets once
     existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
 
-    # 2. Pre-create any missing worksheets in one single batch request
+    # 2. Identify missing titles (these are the ONLY ones we will process)
     missing_titles = [
         _sanitize_sheet_title(label) 
         for label in rows_by_source.keys() 
         if _sanitize_sheet_title(label) not in existing_worksheets and _sanitize_sheet_title(label) != "📌 Navigation"
     ]
     
+    # Pre-create only the missing worksheets
     if missing_titles:
         add_requests = [{"addSheet": {"properties": {"title": title}}} for title in missing_titles]
         spreadsheet.batch_update({"requests": add_requests})
-        time.sleep(1.5)  # Safe pause after bulk creation
+        time.sleep(1.0)
         existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
 
-    # 3. Process each worksheet tab securely with pacing delays
-    for source_label in sorted(rows_by_source.keys(), key=lambda s: s.lower()):
-        rows = rows_by_source[source_label]
+    # (Batch clear step removed: We no longer want to wipe old data!)
+
+    # 3. Prepare bulk value updates for ONLY the new sheets
+    batch_values_data = []
+    all_formatting_requests = []
+
+    sorted_sources = sorted(rows_by_source.keys(), key=lambda s: s.lower())
+
+    for source_label in sorted_sources:
         title = _sanitize_sheet_title(source_label)
+        rows = rows_by_source[source_label]
         n_data_rows = len(rows)
         n_cols = len(CHECKLIST_HEADERS)
-
         ws = existing_worksheets.get(title)
-        if not ws:
-            ws = spreadsheet.add_worksheet(
-                title=title, rows=max(n_data_rows + 1, 2), cols=n_cols
-            )
-            time.sleep(1.0)
 
-        ws.clear()
+        # DATA VALIDATION: If the sheet was not in missing_titles, it already existed. 
+        # Skip writing values and formatting to prevent overwriting.
+        if title not in missing_titles:
+            # We still add it to sources_info so it appears on the Navigation page
+            if ws:
+                sources_info.append((title, f"Existing (New: {n_data_rows})", ws.id))
+            continue
+
+        # Format the new values payload for NEW sheets only
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
-        
-        # Batch write values safely using spreadsheet.values_batch_update
-        body = {
-            "valueInputOption": "USER_ENTERED",
-            "data": [{"range": f"{title}!A1", "values": values}]
-        }
-        spreadsheet.values_batch_update(body)
-        
-        # Collect formatting requests specific to this worksheet tab
-        tab_formatting_requests = [
-            {
-                "repeatCell": {
-                    "range": {
-                        "sheetId": ws.id,
-                        "startRowIndex": 0,
-                        "endRowIndex": 1,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": n_cols
-                    },
-                    "cell": {
-                        "userEnteredFormat": {
-                            "textFormat": {"bold": True}
-                        }
-                    },
-                    "fields": "userEnteredFormat.textFormat.bold"
-                }
-            },
-            {
-                "updateSheetProperties": {
-                    "properties": {
-                        "sheetId": ws.id,
-                        "gridProperties": {"frozenRowCount": 1}
-                    },
-                    "fields": "gridProperties.frozenRowCount"
-                }
-            }
-        ]
+        batch_values_data.append({
+            "range": f"'{title}'!A1",
+            "values": values
+        })
 
+        # Queue header formatting and freeze row
+        all_formatting_requests.append({
+            "repeatCell": {
+                "range": {
+                    "sheetId": ws.id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1,
+                    "startColumnIndex": 0,
+                    "endColumnIndex": n_cols
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "textFormat": {"bold": True}
+                    }
+                },
+                "fields": "userEnteredFormat.textFormat.bold"
+            }
+        })
+        all_formatting_requests.append({
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": ws.id,
+                    "gridProperties": {"frozenRowCount": 1}
+                },
+                "fields": "gridProperties.frozenRowCount"
+            }
+        })
+
+        # Queue validation rules and conditional styling
         for col_idx in CHECKBOX_COL_INDICES:
-            tab_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
+            all_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
-        tab_formatting_requests.append(
+        all_formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
         )
-        tab_formatting_requests.append(
+        all_formatting_requests.append(
             _waybill_row_highlight_request(ws.id, n_data_rows, n_cols, WAYBILL_COL_INDEX)
         )
-        tab_formatting_requests.extend(
+        all_formatting_requests.extend(
             _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
         )
-
-        # Apply formatting per sheet with a safe 1.5-second pause to strictly respect quota limits
-        if tab_formatting_requests:
-            spreadsheet.batch_update({"requests": tab_formatting_requests})
-            time.sleep(1.5)  
 
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
 
-    # Build Navigation Landing Page with batched merges and pauses
+    # 4. Execute ONE single bulk values update for the new sheets
+    if batch_values_data:
+        spreadsheet.values_batch_update({
+            "valueInputOption": "USER_ENTERED",
+            "data": batch_values_data
+        })
+        time.sleep(1.0)
+
+    # 5. Execute formatting requests in chunks to prevent payload limits
+    if all_formatting_requests:
+        chunk_size = 500
+        for i in range(0, len(all_formatting_requests), chunk_size):
+            chunk = all_formatting_requests[i:i + chunk_size]
+            spreadsheet.batch_update({"requests": chunk})
+            time.sleep(0.8)
+
+    # 6. Build Navigation Landing Page
     _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written

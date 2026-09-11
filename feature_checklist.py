@@ -396,15 +396,25 @@ def render_checklist_tab():
 
     result = st.session_state.get("t3_result")
     if st.session_state.get("t3_processed") and result:
-        tabs_summary = ", ".join(f"{title} ({n} rows)" for title, n in result["written"])
-        st.markdown(
-            f"""
-        <div class="success-banner">
-            Updated {len(result['written'])} tab{'s' if len(result['written']) != 1 else ''} across {result['total']} patients: {tabs_summary}.
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
+        
+        # --- NEW UX LOGIC HERE ---
+        if len(result["written"]) > 0:
+            tabs_summary = ", ".join(f"{title} ({n} rows)" for title, n in result["written"])
+            st.markdown(
+                f"""
+                <div class="success-banner">
+                    Added {len(result['written'])} NEW tab{'s' if len(result['written']) != 1 else ''} across {result['total']} patients: {tabs_summary}.
+                    <br><span style="font-size: 0.9em; opacity: 0.9;">(Any pre-existing source tabs were safely skipped to prevent overwriting data.)</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info(
+                f"**No new tabs were created.** All Patient Sources detected in your upload already have existing tabs in the Google Sheet. They were skipped to prevent overwriting existing data."
+            )
+        # -------------------------
+
         st.markdown(f"[Open the spreadsheet]({result['sheet_url']})")
 
         with st.expander("Detected column mapping (click to verify)"):
