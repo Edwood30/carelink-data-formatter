@@ -6,13 +6,12 @@ Source into its own worksheet (tab) inside one fixed Google Spreadsheet
 — same URL every time, updated in place on every run.
 
 Requires a Google Cloud service account configured in Streamlit secrets.
-See README.md for the full setup walkthrough. This module does nothing
-(and is_configured() returns False) until that's done.
 """
 import re
 import time
 
 import gspread
+from gspread.exceptions import APIError
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
@@ -42,7 +41,6 @@ CHECKLIST_HEADERS = [
     "WAYBILL",
 ]
 
-# 0-based column indices, computed from CHECKLIST_HEADERS
 _CHECKBOX_HEADERS = ("1ST CONTACT", "2ND CONTACT", "PRESCRIBED", "PACKED", "WAYBILL")
 CHECKBOX_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in _CHECKBOX_HEADERS]
 CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("CONSULT")
@@ -73,7 +71,6 @@ def default_spreadsheet_url():
 
 
 def extract_spreadsheet_id(url_or_id):
-    """Accepts either a full Google Sheets URL or a bare spreadsheet ID."""
     url_or_id = (url_or_id or "").strip()
     m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url_or_id)
     return m.group(1) if m else url_or_id
@@ -87,7 +84,6 @@ def _get_client():
 
 
 def _sanitize_sheet_title(s):
-    """Google Sheets tab names can't contain : \\ / ? * [ ] and are capped at 100 chars."""
     s = str(s or "").strip()
     for ch in ("\\", "/", "?", "*", "[", "]", ":"):
         s = s.replace(ch, "")
@@ -110,9 +106,22 @@ def _row_to_values(row):
         "PRESCRIBED": "",
         "PACKED": "",
         "2ND CONTACT": "",
-        "WAYBILL": False,  # Default unchecked boolean for Google Sheets
+        "WAYBILL": False, 
     }
     return [mapping.get(h, "") for h in CHECKLIST_HEADERS]
+
+
+def _safe_batch_update(func, *args, **kwargs):
+    """Executes a batch update with exponential backoff to handle 429 Quota Exceeded errors."""
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            return func(*args, **kwargs)
+        except APIError as e:
+            if "429" in str(e) and attempt < max_retries - 1:
+                time.sleep((2 ** attempt) + 1) # Sleeps for 2, 5, 9 seconds...
+            else:
+                raise
 
 
 def _checkbox_request(sheet_id, n_data_rows, col_index):
@@ -153,24 +162,11 @@ def _dropdown_request(sheet_id, n_data_rows, col_index, options):
 
 
 def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
-    """Adds conditional formatting rules to color the Consult status options."""
     color_map = {
-        "Pending": {
-            "bg": {"red": 1.0, "green": 0.95, "blue": 0.8},
-            "fg": {"red": 0.5, "green": 0.35, "blue": 0.0},
-        },
-        "Scheduled": {
-            "bg": {"red": 0.88, "green": 0.93, "blue": 1.0},
-            "fg": {"red": 0.1, "green": 0.3, "blue": 0.6},
-        },
-        "Completed": {
-            "bg": {"red": 0.85, "green": 0.94, "blue": 0.85},
-            "fg": {"red": 0.1, "green": 0.4, "blue": 0.1},
-        },
-        "No Show": {
-            "bg": {"red": 0.98, "green": 0.85, "blue": 0.85},
-            "fg": {"red": 0.6, "green": 0.1, "blue": 0.1},
-        },
+        "Pending": {"bg": {"red": 1.0, "green": 0.95, "blue": 0.8}, "fg": {"red": 0.5, "green": 0.35, "blue": 0.0}},
+        "Scheduled": {"bg": {"red": 0.88, "green": 0.93, "blue": 1.0}, "fg": {"red": 0.1, "green": 0.3, "blue": 0.6}},
+        "Completed": {"bg": {"red": 0.85, "green": 0.94, "blue": 0.85}, "fg": {"red": 0.1, "green": 0.4, "blue": 0.1}},
+        "No Show": {"bg": {"red": 0.98, "green": 0.85, "blue": 0.85}, "fg": {"red": 0.6, "green": 0.1, "blue": 0.1}},
     }
 
     requests = []
@@ -203,8 +199,7 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
 
 
 def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_idx):
-    """Highlights the ENTIRE row (from column A to N) in soft green when WAYBILL is checked."""
-    col_letter = chr(65 + waybill_col_idx)  # Column 13 -> 'N'
+    col_letter = chr(65 + waybill_col_idx) 
     formula = f"=${col_letter}2=TRUE"
 
     return {
@@ -228,34 +223,25 @@ def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_id
                     }
                 }
             },
-            "index": 0  # Priority index 0 so it highlights the whole row when checked
+            "index": 0 
         }
     }
 
 
 def _build_navigation_tab(spreadsheet, sources_info):
-    """Creates a 'Navigation' dashboard tab with big clickable source buttons using batched requests."""
+    """Creates a 'Navigation' dashboard using exactly TWO quota-efficient batch calls."""
     nav_title = "📌 Navigation"
     
     try:
         nav_ws = spreadsheet.worksheet(nav_title)
         nav_ws.clear()
-        
-        spreadsheet.batch_update({
-            "requests": [{"unmergeCells": {"range": {"sheetId": nav_ws.id}}}]
-        })
     except gspread.WorksheetNotFound:
-        nav_ws = spreadsheet.add_worksheet(
-            title=nav_title, rows=max(50, len(sources_info) * 4 + 10), cols=10
-        )
+        nav_ws = spreadsheet.add_worksheet(title=nav_title, rows=max(50, len(sources_info) * 4 + 10), cols=10)
 
     spreadsheet.reorder_worksheets([nav_ws] + [w for w in spreadsheet.worksheets() if w.title != nav_title])
-    time.sleep(0.4)
-
-    start_row = 5
-    button_requests = []
-    merge_requests = []
     
+    # Payload 1: Update all text values
+    start_row = 5
     update_data = [
         {
             "range": "B2:B3",
@@ -269,13 +255,36 @@ def _build_navigation_tab(spreadsheet, sources_info):
     for idx, (title, count, gid) in enumerate(sources_info):
         row_num = start_row + (idx * 3)
         formula = f'=HYPERLINK("#gid={gid}", "📂 {title.upper()} ({count} Patients)")'
-        
         update_data.append({
             "range": f"B{row_num}",
             "values": [[formula]]
         })
+
+    _safe_batch_update(nav_ws.batch_update, update_data, value_input_option="USER_ENTERED")
+
+    # Payload 2: Compile ALL formatting rules, unmerges, and styles into ONE request
+    formatting_requests = [{"unmergeCells": {"range": {"sheetId": nav_ws.id}}}]
+    
+    # Title Formats B2 & B3 (Replaces the unbatched nav_ws.format calls)
+    formatting_requests.append({
+        "repeatCell": {
+            "range": {"sheetId": nav_ws.id, "startRowIndex": 1, "endRowIndex": 2, "startColumnIndex": 1, "endColumnIndex": 2},
+            "cell": {"userEnteredFormat": {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}}},
+            "fields": "userEnteredFormat.textFormat"
+        }
+    })
+    formatting_requests.append({
+        "repeatCell": {
+            "range": {"sheetId": nav_ws.id, "startRowIndex": 2, "endRowIndex": 3, "startColumnIndex": 1, "endColumnIndex": 2},
+            "cell": {"userEnteredFormat": {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}}},
+            "fields": "userEnteredFormat.textFormat"
+        }
+    })
+
+    for idx, (title, count, gid) in enumerate(sources_info):
+        row_num = start_row + (idx * 3)
         
-        merge_requests.append({
+        formatting_requests.append({
             "mergeCells": {
                 "range": {
                     "sheetId": nav_ws.id,
@@ -288,7 +297,7 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
         
-        button_requests.append({
+        formatting_requests.append({
             "repeatCell": {
                 "range": {
                     "sheetId": nav_ws.id,
@@ -313,18 +322,8 @@ def _build_navigation_tab(spreadsheet, sources_info):
             }
         })
 
-    nav_ws.batch_update(update_data, value_input_option="USER_ENTERED")
-    time.sleep(0.4)
-
-    if merge_requests:
-        spreadsheet.batch_update({"requests": merge_requests})
-        time.sleep(0.4)
-
-    nav_ws.format("B2", {"textFormat": {"bold": True, "fontSize": 16, "foregroundColor": {"red": 0.1, "green": 0.2, "blue": 0.4}}})
-    nav_ws.format("B3", {"textFormat": {"italic": True, "fontSize": 11, "foregroundColor": {"red": 0.4, "green": 0.4, "blue": 0.4}}})
-
-    if button_requests:
-        spreadsheet.batch_update({"requests": button_requests})
+    if formatting_requests:
+        _safe_batch_update(spreadsheet.batch_update, {"requests": formatting_requests})
 
 
 def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
@@ -347,26 +346,19 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
     written = []
     sources_info = []
 
-    # 1. Fetch all existing worksheets once
     existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
 
-    # 2. Identify missing titles (these are the ONLY ones we will process)
     missing_titles = [
         _sanitize_sheet_title(label) 
         for label in rows_by_source.keys() 
         if _sanitize_sheet_title(label) not in existing_worksheets and _sanitize_sheet_title(label) != "📌 Navigation"
     ]
     
-    # Pre-create only the missing worksheets
     if missing_titles:
         add_requests = [{"addSheet": {"properties": {"title": title}}} for title in missing_titles]
-        spreadsheet.batch_update({"requests": add_requests})
-        time.sleep(1.0)
+        _safe_batch_update(spreadsheet.batch_update, {"requests": add_requests})
         existing_worksheets = {ws.title: ws for ws in spreadsheet.worksheets()}
 
-    # (Batch clear step removed: We no longer want to wipe old data!)
-
-    # 3. Prepare bulk value updates for ONLY the new sheets
     batch_values_data = []
     all_formatting_requests = []
 
@@ -379,22 +371,17 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         n_cols = len(CHECKLIST_HEADERS)
         ws = existing_worksheets.get(title)
 
-        # DATA VALIDATION: If the sheet was not in missing_titles, it already existed. 
-        # Skip writing values and formatting to prevent overwriting.
         if title not in missing_titles:
-            # We still add it to sources_info so it appears on the Navigation page
             if ws:
                 sources_info.append((title, f"Existing (New: {n_data_rows})", ws.id))
             continue
 
-        # Format the new values payload for NEW sheets only
         values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
         batch_values_data.append({
             "range": f"'{title}'!A1",
             "values": values
         })
 
-        # Queue header formatting and freeze row
         all_formatting_requests.append({
             "repeatCell": {
                 "range": {
@@ -422,7 +409,6 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
             }
         })
 
-        # Queue validation rules and conditional styling
         for col_idx in CHECKBOX_COL_INDICES:
             all_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
         
@@ -439,23 +425,18 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
         written.append((title, n_data_rows))
         sources_info.append((title, n_data_rows, ws.id))
 
-    # 4. Execute ONE single bulk values update for the new sheets
     if batch_values_data:
-        spreadsheet.values_batch_update({
+        _safe_batch_update(spreadsheet.values_batch_update, {
             "valueInputOption": "USER_ENTERED",
             "data": batch_values_data
         })
-        time.sleep(1.0)
 
-    # 5. Execute formatting requests in chunks to prevent payload limits
     if all_formatting_requests:
         chunk_size = 500
         for i in range(0, len(all_formatting_requests), chunk_size):
             chunk = all_formatting_requests[i:i + chunk_size]
-            spreadsheet.batch_update({"requests": chunk})
-            time.sleep(0.8)
+            _safe_batch_update(spreadsheet.batch_update, {"requests": chunk})
 
-    # 6. Build Navigation Landing Page
     _build_navigation_tab(spreadsheet, sources_info)
 
     return spreadsheet.url, written
