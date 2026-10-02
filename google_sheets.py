@@ -31,22 +31,37 @@ CHECKLIST_HEADERS = [
     "FIRST NAME",
     "MIDDLE NAME",
     "ADDRESS",
-    "1ST CONTACT",
+    "CONTACTED",
+    "CONTACT DATE",
+    "CONTACT STATUS",
     "NOTES",
     "CONSULT",
     "MEDICINE RENDERED",
     "PRESCRIBED",
     "PACKED",
-    "2ND CONTACT",
-    "WAYBILL",
+    "DELIVERY STATUS",
+    "LAST DELIVERY DATE",
+    "NEXT CONTACT DATE",
+    "FOLLOW-UP STATUS",
+    "CARELINK UPDATED",
 ]
 
-_CHECKBOX_HEADERS = ("1ST CONTACT", "2ND CONTACT", "PRESCRIBED", "PACKED", "WAYBILL")
+_CHECKBOX_HEADERS = ("CONTACTED", "PRESCRIBED", "PACKED", "CARELINK UPDATED")
 CHECKBOX_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in _CHECKBOX_HEADERS]
+DATE_COL_INDICES = [CHECKLIST_HEADERS.index(h) for h in ("CONTACT DATE", "LAST DELIVERY DATE")]
+DATE_FORMAT_COL_INDICES = DATE_COL_INDICES + [CHECKLIST_HEADERS.index("NEXT CONTACT DATE")]
+CONTACT_STATUS_COL_INDEX = CHECKLIST_HEADERS.index("CONTACT STATUS")
 CONSULT_COL_INDEX = CHECKLIST_HEADERS.index("CONSULT")
-WAYBILL_COL_INDEX = CHECKLIST_HEADERS.index("WAYBILL")
+DELIVERY_STATUS_COL_INDEX = CHECKLIST_HEADERS.index("DELIVERY STATUS")
+LAST_DELIVERY_DATE_COL_INDEX = CHECKLIST_HEADERS.index("LAST DELIVERY DATE")
+NEXT_CONTACT_DATE_COL_INDEX = CHECKLIST_HEADERS.index("NEXT CONTACT DATE")
+FOLLOW_UP_STATUS_COL_INDEX = CHECKLIST_HEADERS.index("FOLLOW-UP STATUS")
+CARELINK_UPDATED_COL_INDEX = CHECKLIST_HEADERS.index("CARELINK UPDATED")
 
-CONSULT_OPTIONS = ["Pending", "Scheduled", "Completed", "No Show"]
+CONTACT_STATUS_OPTIONS = ["CONTACTED", "NO ANSWER", "WRONG NUMBER", "DROP"]
+CONSULT_OPTIONS = ["YES", "NO", "REFILL"]
+DELIVERY_STATUS_OPTIONS = ["DELIVERED", "FOR DELIVERY", "NOT DELIVERED"]
+FOLLOW_UP_STATUS_OPTIONS = ["DUE", "UPCOMING", "DONE"]
 
 
 def is_configured():
@@ -91,7 +106,7 @@ def _sanitize_sheet_title(s):
     return (s[:100] or "Unspecified Source")
 
 
-def _row_to_values(row):
+def _row_to_values(row, row_number):
     mapping = {
         "PATIENT SOURCE": row.get("PATIENT SOURCE", row.get("Patient Source", "")),
         "CONTACT NUMBER": row.get("CONTACT NUMBER", row.get("Cellphone Number", "")),
@@ -99,14 +114,19 @@ def _row_to_values(row):
         "FIRST NAME": row.get("FIRST NAME", row.get("First Name", "")),
         "MIDDLE NAME": row.get("MIDDLE NAME", row.get("Middle Name", "")),
         "ADDRESS": row.get("ADDRESS", row.get("Full Address", "")),
-        "1ST CONTACT": "",
+        "CONTACTED": False,
+        "CONTACT DATE": "",
+        "CONTACT STATUS": "",
         "NOTES": row.get("NOTES", row.get("Notes", "")),
         "CONSULT": "",
         "MEDICINE RENDERED": row.get("MEDICINE RENDERED", row.get("Medicines rendered", "")),
-        "PRESCRIBED": "",
-        "PACKED": "",
-        "2ND CONTACT": "",
-        "WAYBILL": False, 
+        "PRESCRIBED": False,
+        "PACKED": False,
+        "DELIVERY STATUS": "",
+        "LAST DELIVERY DATE": "",
+        "NEXT CONTACT DATE": f'=IF(P{row_number}="","",EDATE(P{row_number},1))',
+        "FOLLOW-UP STATUS": f'=IF(S{row_number}=TRUE,"DONE",IF(Q{row_number}="","",IF(Q{row_number}<=TODAY(),"DUE","UPCOMING")))',
+        "CARELINK UPDATED": False,
     }
     return [mapping.get(h, "") for h in CHECKLIST_HEADERS]
 
@@ -161,14 +181,7 @@ def _dropdown_request(sheet_id, n_data_rows, col_index, options):
     }
 
 
-def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
-    color_map = {
-        "Pending": {"bg": {"red": 1.0, "green": 0.95, "blue": 0.8}, "fg": {"red": 0.5, "green": 0.35, "blue": 0.0}},
-        "Scheduled": {"bg": {"red": 0.88, "green": 0.93, "blue": 1.0}, "fg": {"red": 0.1, "green": 0.3, "blue": 0.6}},
-        "Completed": {"bg": {"red": 0.85, "green": 0.94, "blue": 0.85}, "fg": {"red": 0.1, "green": 0.4, "blue": 0.1}},
-        "No Show": {"bg": {"red": 0.98, "green": 0.85, "blue": 0.85}, "fg": {"red": 0.6, "green": 0.1, "blue": 0.1}},
-    }
-
+def _text_color_formatting_requests(sheet_id, n_data_rows, col_idx, color_map):
     requests = []
     for option, colors in color_map.items():
         requests.append({
@@ -178,8 +191,8 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
                         "sheetId": sheet_id,
                         "startRowIndex": 1,
                         "endRowIndex": 1 + n_data_rows,
-                        "startColumnIndex": consult_col_idx,
-                        "endColumnIndex": consult_col_idx + 1,
+                        "startColumnIndex": col_idx,
+                        "endColumnIndex": col_idx + 1,
                     }],
                     "booleanRule": {
                         "condition": {
@@ -198,9 +211,49 @@ def _consult_color_formatting_requests(sheet_id, n_data_rows, consult_col_idx):
     return requests
 
 
-def _waybill_row_highlight_request(sheet_id, n_data_rows, n_cols, waybill_col_idx):
-    col_letter = chr(65 + waybill_col_idx) 
-    formula = f"=${col_letter}2=TRUE"
+def _column_letter(col_index):
+    letters = ""
+    while col_index >= 0:
+        col_index, remainder = divmod(col_index, 26)
+        letters = chr(65 + remainder) + letters
+        col_index -= 1
+    return letters
+
+
+def _date_validation_request(sheet_id, n_data_rows, col_index):
+    return {
+        "setDataValidation": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "endRowIndex": 1 + n_data_rows,
+                "startColumnIndex": col_index,
+                "endColumnIndex": col_index + 1,
+            },
+            "rule": {"condition": {"type": "DATE_IS_VALID"}, "strict": True},
+        }
+    }
+
+
+def _date_format_request(sheet_id, n_data_rows, col_index):
+    return {
+        "repeatCell": {
+            "range": {
+                "sheetId": sheet_id,
+                "startRowIndex": 1,
+                "endRowIndex": 1 + n_data_rows,
+                "startColumnIndex": col_index,
+                "endColumnIndex": col_index + 1,
+            },
+            "cell": {"userEnteredFormat": {"numberFormat": {"type": "DATE", "pattern": "yyyy-mm-dd"}}},
+            "fields": "userEnteredFormat.numberFormat",
+        }
+    }
+
+
+def _delivered_row_highlight_request(sheet_id, n_data_rows, n_cols, delivery_status_col_idx):
+    col_letter = _column_letter(delivery_status_col_idx)
+    formula = f'=${col_letter}2="DELIVERED"'
 
     return {
         "addConditionalFormatRule": {
@@ -376,7 +429,10 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
                 sources_info.append((title, f"Existing (New: {n_data_rows})", ws.id))
             continue
 
-        values = [CHECKLIST_HEADERS] + [_row_to_values(r) for r in rows]
+        values = [CHECKLIST_HEADERS] + [
+            _row_to_values(row, row_number)
+            for row_number, row in enumerate(rows, start=2)
+        ]
         batch_values_data.append({
             "range": f"'{title}'!A1",
             "values": values
@@ -411,15 +467,51 @@ def push_checklist_by_source(spreadsheet_url_or_id, rows_by_source):
 
         for col_idx in CHECKBOX_COL_INDICES:
             all_formatting_requests.append(_checkbox_request(ws.id, n_data_rows, col_idx))
+
+        for col_idx in DATE_COL_INDICES:
+            all_formatting_requests.append(_date_validation_request(ws.id, n_data_rows, col_idx))
+
+        for col_idx in DATE_FORMAT_COL_INDICES:
+            all_formatting_requests.append(_date_format_request(ws.id, n_data_rows, col_idx))
         
+        all_formatting_requests.append(
+            _dropdown_request(ws.id, n_data_rows, CONTACT_STATUS_COL_INDEX, CONTACT_STATUS_OPTIONS)
+        )
         all_formatting_requests.append(
             _dropdown_request(ws.id, n_data_rows, CONSULT_COL_INDEX, CONSULT_OPTIONS)
         )
         all_formatting_requests.append(
-            _waybill_row_highlight_request(ws.id, n_data_rows, n_cols, WAYBILL_COL_INDEX)
+            _dropdown_request(ws.id, n_data_rows, DELIVERY_STATUS_COL_INDEX, DELIVERY_STATUS_OPTIONS)
+        )
+        all_formatting_requests.append(
+            _dropdown_request(ws.id, n_data_rows, FOLLOW_UP_STATUS_COL_INDEX, FOLLOW_UP_STATUS_OPTIONS)
+        )
+        all_formatting_requests.append(
+            _delivered_row_highlight_request(ws.id, n_data_rows, n_cols, DELIVERY_STATUS_COL_INDEX)
         )
         all_formatting_requests.extend(
-            _consult_color_formatting_requests(ws.id, n_data_rows, CONSULT_COL_INDEX)
+            _text_color_formatting_requests(
+                ws.id,
+                n_data_rows,
+                DELIVERY_STATUS_COL_INDEX,
+                {
+                    "DELIVERED": {"bg": {"red": 0.8, "green": 0.93, "blue": 0.8}, "fg": {"red": 0.05, "green": 0.35, "blue": 0.05}},
+                    "FOR DELIVERY": {"bg": {"red": 0.88, "green": 0.93, "blue": 1.0}, "fg": {"red": 0.1, "green": 0.3, "blue": 0.6}},
+                    "NOT DELIVERED": {"bg": {"red": 0.98, "green": 0.85, "blue": 0.85}, "fg": {"red": 0.6, "green": 0.1, "blue": 0.1}},
+                },
+            )
+        )
+        all_formatting_requests.extend(
+            _text_color_formatting_requests(
+                ws.id,
+                n_data_rows,
+                FOLLOW_UP_STATUS_COL_INDEX,
+                {
+                    "DUE": {"bg": {"red": 0.98, "green": 0.85, "blue": 0.85}, "fg": {"red": 0.6, "green": 0.1, "blue": 0.1}},
+                    "UPCOMING": {"bg": {"red": 1.0, "green": 0.95, "blue": 0.8}, "fg": {"red": 0.5, "green": 0.35, "blue": 0.0}},
+                    "DONE": {"bg": {"red": 0.85, "green": 0.94, "blue": 0.85}, "fg": {"red": 0.1, "green": 0.4, "blue": 0.1}},
+                },
+            )
         )
 
         written.append((title, n_data_rows))

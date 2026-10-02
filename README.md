@@ -153,20 +153,22 @@ it writes directly into a Google Sheet.
    as Coordinator.
 2. Paste (or use the pre-filled default) the target **Google Sheet URL**.
 3. Click **Push to Google Sheets**. For every Patient Source found across
-   both files, the app creates or updates a worksheet tab named after that
-   source, inside that one spreadsheet — same URL every time, one tab per
-   source. Re-running it overwrites those tabs in place rather than piling
-   up duplicates.
+   both files, the app creates a worksheet tab named after that source if
+   one does not already exist. Existing source tabs are skipped to protect
+   manually maintained data; new checklist columns are applied to newly
+   created tabs.
 4. Every patient appears exactly once, in **Last Name, First Name, Middle
    Name** columns, sorted alphabetically by Last Name. Patients who already
    received medicine have their medicines combined into one cell (e.g.
    `Paracetamol, Amoxicillin`); patients still awaiting follow-up show
    blank Medicines/Source. Patients with no detected source land in an
    "Unspecified Source" tab.
-5. `1st Contact`, `2nd Contact`, `Prescribed`, and `Packed` are real Google
-   Sheets checkboxes; `Consult` is a real dropdown (default options:
-   `Pending / Scheduled / Completed / No Show` — see `CONSULT_OPTIONS` in
-   `google_sheets.py` to change them).
+5. `Contacted`, `Prescribed`, `Packed`, and `CareLink Updated` are Google
+   Sheets checkboxes. Contact status, consult, and delivery status are
+   dropdowns. Set a Last Delivery Date to calculate Next Contact Date one
+   month later; Follow-Up Status becomes Due or Upcoming based on that date,
+   and Done when CareLink Updated is checked. A Delivered status highlights
+   the patient's entire row.
 
 ### One-time setup (required before this tab will work)
 
